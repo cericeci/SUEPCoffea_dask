@@ -476,6 +476,13 @@ class SUEP_cluster(processor.ProcessorABC):
         self.events, self.electrons, self.muons = self.selectByLeptons(self.events)[:3]
         if not(self.shouldContinueAfterCut(self.events, outputs)): return accumulator # If we have no events, we simply stop
 
+        #Sort electrons and muons by pT
+        highpt_electrons = ak.argsort(self.electrons.pt, axis=1, ascending=False, stable=True)
+        self.electrons = self.electrons[highpt_electrons]
+
+        highpt_muons = ak.argsort(self.muons.pt, axis=1, ascending=False, stable=True)
+        self.muons = self.muons[highpt_muons]
+
         # Trigger selection
         if debug: print("%i events pass lepton cuts. Applying trigger requirements...."%len(self.events))
         self.events, [self.electrons, self.muons] = self.selectByTrigger(self.events,[self.electrons, self.muons])
@@ -521,6 +528,9 @@ class SUEP_cluster(processor.ProcessorABC):
           self.puweights   = self.doPUWeights(self.events)                                   # Does not change selection
           self.l1preweights= self.doPrefireWeights(self.events)
           self.triggerSFs = self.doTriggerSFs(self.electrons, self.muons)
+          for i in range(len(self.triggerSFs['TrigSF'])):
+              if self.triggerSFs['TrigSF'][i] == 0:
+                  print('meow')
 
         # ------------------------------------------------------------------------------
         # ------------------------------- UNCERTAINTIES --------------------------------
