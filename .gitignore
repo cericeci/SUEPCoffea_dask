@@ -13,11 +13,9 @@ dask-worker-space/
 *.dat
 *.png
 *.pdf
-*.txt
 CMSSW*
 *cc
 plotting/*root
 plotting/.gitignore
 .gitignore
 plotting/ABCD/
-.gitignore

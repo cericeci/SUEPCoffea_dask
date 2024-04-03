@@ -75,13 +75,11 @@ class sample(object):
         if options.resubmit:
           if os.path.isfile(fullfilename):
             if os.path.getsize(fullfilename) > 100: #I.e., non corrupted
-              #print("Exists!")
               continue    
         if not(options.toLoad and (("skim" in self.config) or (self.isData)) and os.path.isfile(fullfilename)) and not(options.fromROOT):
           if not("skim" in self.config) and not(self.isData) or (not(options.queue) and not(options.toLoad)):
             a = pd.HDFStore(f, "r")
           if not("skim" in self.config) and not(self.isData) and not(self.noWeights):
-            #print(a.get_storer("SR").attrs.metadata)
             self.nnorms[f] = a.get_storer("SR").attrs.metadata["gensumweight"]
           if not(options.queue) and not(options.toLoad):
             b = {}
@@ -93,12 +91,12 @@ class sample(object):
               try:
                 b[k.replace("/","")] = a[k]
               except: # If we are here, there are no events at the cut level, so just save empty space (still need to count for normalizing)
+                if options.debug: raise
                 b[k.replace("/","")] = []
             self.hdfiles.append(b)
           if not("skim" in self.config) and not(self.isData) or (not(options.queue) and not(options.toLoad)):
             a.close()
         self.safefiles.append(f)
-        #print("File %s loaded succesfully"%f)
       except Exception as e:
         print("File %s broken, will skip loading it"%f)
         print(str(e))
@@ -134,20 +132,34 @@ class sample(object):
   
 
   def getUnskimmedYields(self):
-    rf = ROOT.TFile(self.config["skim"])
-    out = {}
-    norm = 0
-    for f in self.safefiles:
-       run, luminosityBlock, event= f.split("/")[-1].replace("out_","").replace(".hdf5","").split("_")
-       tt = rf.Get("Runs_"+str(event)+ "_" + str(luminosityBlock) + "_" + str(run))
-       for ev in tt:
-         if self.noWeights:
-           out[f] = 1 
-           norm   += 1
-         else:
-           out[f] = ev.genEventSumw
-           norm += ev.genEventSumw
-         break
+    if "auto" in self.config["skim"]:
+      import json 
+      skims = json.loads(open(self.config["skim"].replace("auto:",""), "r").read())
+      out = {}
+      norm = 0
+      for f in self.safefiles:
+        short = f.split("/")[-1]
+        out[f] = skims[short]
+        norm += skims[short]
+
+    else:
+      rf = ROOT.TFile(self.config["skim"])
+      out = {}
+      norm = 0
+      for f in self.safefiles:
+        print(f)
+        run, luminosityBlock, event= f.split("/")[-1].replace("out_","").replace(".hdf5","").split("_")
+        print(run, luminosityBlock, event)
+        tt = rf.Get("Runs_"+str(event)+ "_" + str(luminosityBlock) + "_" + str(run))
+        out[f] = 0
+        for ev in tt:
+          if self.noWeights:
+            out[f] = 1 
+            norm   += 1
+          else:
+            out[f] += ev.genEventSumw
+            norm += ev.genEventSumw
+          #break
     return out, norm
 
   def addPlot(self, plotdict):
@@ -181,7 +193,7 @@ class sample(object):
         self.histos[plotName]["total"] = ROOT.TH1F(plotName + "_" + self.name, plotName + "_" + self.name, p["bins"][1], p["bins"][2], p["bins"][3])
       elif p["bins"][0] == "limits":
         self.histos[plotName] = {}
-        self.histos[plotName]["total"] = ROOT.TH1F(plotName + "_" + self.name, plotName + "_" + self.name, array.array('f', p["bins"][1])) 
+        self.histos[plotName]["total"] = ROOT.TH1F(plotName + "_" + self.name, plotName + "_" + self.name, p["bins"][2], array.array('f', p["bins"][1])) 
       elif p["bins"][0] == "2Duniform": 
         self.histos[plotName] = {}
         self.histos[plotName]["total"] = ROOT.TH2F(plotName + "_" + self.name, plotName + "_" + self.name, p["bins"][1], p["bins"][2], p["bins"][3], p["bins"][4], p["bins"][5], p["bins"][6])
@@ -236,7 +248,7 @@ class sample(object):
           elif self.noWeights: self.norms[plotName] = 1
           if not(self.dohadd):
             filename = self.safefiles[iff].split("/")[-1].replace("out_","").replace(".hdf5","")
-            #print(filename, plotName, self.histos[plotName][filename].Integral())
+            print(filename)#, plotName, self.histos[plotName][filename].Integral())
             self.histos[plotName]["total"].Add(self.histos[plotName][filename])
             del self.histos[plotName][filename]
             if self.doSyst:
@@ -314,6 +326,7 @@ class sample(object):
       for plotName in self.plotsinchannel[c]:
         print("1", self.histos)
         p = self.plots[plotName]
+        print(self.config["th1"][""])
         self.histos[plotName]["total"]       = copy.deepcopy(inROOT.Get(self.config["th1"][""]))
         if not("data" in self.name):
           self.histos[plotName+"_Up"]["total"] = copy.deepcopy(inROOT.Get(self.config["th1"]["Up"]))
@@ -345,7 +358,8 @@ class sample(object):
         if empty: print("Is empty!", c)
         weights = {}
         if not(self.isData or self.noWeights):
-          if empty:
+          if empty or (len(f[c]) == 0):
+            empty = True
             weights[""] = []
           else:
             weights[""] = f[c]["genweight"]
@@ -393,6 +407,7 @@ class sample(object):
                     values[var], values2[var], weightsNom[var] = [], [], []
             else:
               values[""], values2[""], weightsNom[""] = p["value"](f[c], weights[""])
+
               if self.doSyst:
                 for var in self.variations:
                   if (c in self.variations[var]["replaceChannel"]) and type(f[self.variations[var]["replaceChannel"][c]]) == type(f[c]):
@@ -409,6 +424,7 @@ class sample(object):
                     values[var], weightsNom[var] = [], []
             else:
               values[""], weightsNom[""] = p["value"](f[c], weights[""])
+
               if self.doSyst:
                 for var in self.variations:
                   if (c in self.variations[var]["replaceChannel"]) and type(f[self.variations[var]["replaceChannel"][c]]) == type(f[c]):
@@ -431,13 +447,22 @@ class sample(object):
           else:
             weightsHere = weightsNom
 
-          if "2D" in p["bins"][0]: 
+          if "2D" in p["bins"][0]:
+            #for iev in range(len(weightsHere[""])):
+            #  if weightsHere[""][iev] > 0:
+            #    print(iev, weightsHere[""][iev], values[""][iev], values2[""][iev])
+            #print(sum(weightsHere[""]))
+
             root_numpy.fill_hist(self.histos[p["name"]][filename], np.vstack([values[""], values2[""]]).T, weightsHere[""])
             if self.doSyst:
               for var in self.variations:
                 if not(c in self.variations[var]["replaceChannel"]):
                   root_numpy.fill_hist(self.histos[p["name"]+ "_" + var + ("Up" if self.variations[var]["symmetrize"] else "")][filename], np.vstack([values[""], values2[""]]).T, weightsHere[var])
           else:
+            #for iev in range(len(weightsHere[""])):
+            #  if weightsHere[""][iev] > 0:
+            #    print(iev, weightsHere[""][iev], values[""][iev])
+            #print(sum(weightsHere[""]))
             root_numpy.fill_hist(self.histos[p["name"]][filename], values[""], weightsHere[""])
             if self.doSyst:
               for var in self.variations:
@@ -504,7 +529,6 @@ class sample(object):
     # Collect all filenames 
     inputFiles = []
     for iff, f in enumerate(self.safefiles):
-      #print(iff, f)
       safefile = self.safefiles[iff]
       filename = safefile.split("/")[-1].replace("out_","").replace(".hdf5","")
       inputFiles.append(options.toLoad.replace("{YEAR}", self.config["year"]) + "/" + self.name + "_" + filename + ".root")
@@ -556,6 +580,9 @@ class plotter(object):
 
   def createJobs(self, options, command):
     iJob = 0
+    csize = 0
+    clength = 0
+    cfiles = []
     if options.toLoad: options.batchsize = 1e6 # No chunks when merging
     for s in self.samples:
       s.initAllForQueue(options)
@@ -566,44 +593,77 @@ class plotter(object):
           print("Hadded file %s already exists, will read from there"%outputFil)
           continue
       sname = s.name
-      nfiles = len(s.safefiles)
-      options.batchsize = int(options.batchsize)
-      chunks = int(math.ceil(nfiles*1./(options.batchsize)))
-      jobfile = open("%s/exec/_%i.sh"%(options.jobname, iJob),"w")
-      jobfile.write("#!/bin/bash\n")
-      jobfile.write("cd %s\n"%os.getcwd())
-      if chunks == 1:
-        jobfile = open("%s/exec/_%i.sh"%(options.jobname, iJob),"w")
-        jobfile.write("#!/bin/bash\n")
-        jobfile.write("source /afs/cern.ch/cms/cmsset_default.sh\n")
-        jobfile.write("cd /eos/user/c/cericeci/CMSSW_10_6_29/src/\n")
-        jobfile.write("cmsenv\n")
-        jobfile.write("cd %s\n"%os.getcwd())
-        jobfile.write(command + " --sample %s --files %s"%(sname, ",".join(s.safefiles)))
-        jobfile.close()
-        iJob += 1
-      else:
-        for i in range(chunks-1):
+      if not (options.smartSplitting):
+        nfiles = len(s.safefiles)
+        options.batchsize = int(options.batchsize)
+        chunks = int(math.ceil(nfiles*1./(options.batchsize)))
+
+        if chunks == 1:
           jobfile = open("%s/exec/_%i.sh"%(options.jobname, iJob),"w")
           jobfile.write("#!/bin/bash\n")
-          jobfile.write("source /afs/cern.ch/cms/cmsset_default.sh\n")
-          jobfile.write("cd /eos/user/c/cericeci/CMSSW_10_6_29/src/\n")
-          jobfile.write("cmsenv\n")
-
-          jobfile.write("cd /eos/home-c/cericeci/SUEP/SUEPCoffea_dask/plotting/\n")
-          jobfile.write(command + " --sample %s --files %s"%(sname, ",".join(s.safefiles[i*options.batchsize:(i+1)*options.batchsize])))
-          iJob += 1
+          #jobfile.write("source /cvmfs/sft.cern.ch/lcg/views/LCG_99/x86_64-centos7-gcc8-opt/setup.sh\n")
+          if not(options.queue == "local"):  jobfile.write("cd /eos/user/c/cericeci/CMSSW_10_6_29/src/\n")
+          if not(options.queue == "local"):  jobfile.write("source /cvmfs/cms.cern.ch/cmsset_default.sh\n")
+          if not(options.queue == "local"):  jobfile.write("cmsenv\n")
+          if not(options.queue == "local"):  jobfile.write("cd %s\n"%os.getcwd())
+          jobfile.write(command + " --sample %s --files %s"%(sname, ",".join(s.safefiles)))
           jobfile.close()
+          iJob += 1
+        else:
+          for i in range(chunks-1):
+            jobfile = open("%s/exec/_%i.sh"%(options.jobname, iJob),"w")
+            jobfile.write("#!/bin/bash\n")
+            #jobfile.write("source /cvmfs/sft.cern.ch/lcg/views/LCG_99/x86_64-centos7-gcc8-opt/setup.sh\n")
+            if not(options.queue == "local"): jobfile.write("cd /eos/user/c/cericeci/CMSSW_10_6_29/src/\n")
+            if not(options.queue == "local"): jobfile.write("source /cvmfs/cms.cern.ch/cmsset_default.sh\n")
+            if not(options.queue == "local"): jobfile.write("cmsenv\n")
+            if not(options.queue == "local"): jobfile.write("cd /eos/home-c/cericeci/SUEP/SUEPCoffea_dask/plotting/\n")
+            jobfile.write(command + " --sample %s --files %s"%(sname, ",".join(s.safefiles[i*options.batchsize:(i+1)*options.batchsize])))
+            iJob += 1
+            jobfile.close()
 
-        jobfile = open("%s/exec/_%i.sh"%(options.jobname, iJob),"w")
-        jobfile.write("#!/bin/bash\n")
-        jobfile.write("source /afs/cern.ch/cms/cmsset_default.sh\n")
-        jobfile.write("cd /eos/user/c/cericeci/CMSSW_10_6_29/src/\n")
-        jobfile.write("cmsenv\n")
-        jobfile.write("cd %s\n"%os.getcwd())
-        jobfile.write(command + " --sample %s --files %s"%(sname, ",".join(s.safefiles[(chunks-1)*options.batchsize:])))
-        jobfile.close()
-        iJob += 1
+          jobfile = open("%s/exec/_%i.sh"%(options.jobname, iJob),"w")
+          jobfile.write("#!/bin/bash\n")
+          #jobfile.write("source /cvmfs/sft.cern.ch/lcg/views/LCG_99/x86_64-centos7-gcc8-opt/setup.sh\n")
+          if not(options.queue == "local"): jobfile.write("cd /eos/user/c/cericeci/CMSSW_10_6_29/src/\n")
+          if not(options.queue == "local"): jobfile.write("source /cvmfs/cms.cern.ch/cmsset_default.sh\n")
+          if not(options.queue == "local"): jobfile.write("cmsenv\n")
+          if not(options.queue == "local"): jobfile.write("cd %s\n"%os.getcwd())
+          jobfile.write(command + " --sample %s --files %s"%(sname, ",".join(s.safefiles[(chunks-1)*options.batchsize:])))
+          jobfile.close()
+          iJob += 1
+      else: # For smart splitting we add files until we pass the size threshold 
+        for f in s.safefiles:
+          cfiles.append(f)
+          csize += os.path.getsize(f)/(1024*1024)
+          clength  += 1
+          if (csize >= float(options.batchsize)) or (clength >= 500):
+            jobfile = open("%s/exec/_%i.sh"%(options.jobname, iJob),"w")
+            jobfile.write("#!/bin/bash\n")
+            if not(options.queue == "local"): jobfile.write("cd /eos/user/c/cericeci/CMSSW_10_6_29/src/\n")
+            if not(options.queue == "local"): jobfile.write("source /cvmfs/cms.cern.ch/cmsset_default.sh\n")
+            if not(options.queue == "local"): jobfile.write("cmsenv\n")
+            if not(options.queue == "local"): jobfile.write("cd %s\n"%os.getcwd())
+            jobfile.write(command + " --files %s"%(",".join(cfiles)))
+            jobfile.close()
+            iJob += 1
+            csize = 0
+            clength = 0
+            cfiles = []
+    if options.smartSplitting and len(cfiles) != 0:
+      jobfile = open("%s/exec/_%i.sh"%(options.jobname, iJob),"w")
+      jobfile.write("#!/bin/bash\n")
+      if not(options.queue == "local"): jobfile.write("cd /eos/user/c/cericeci/CMSSW_10_6_29/src/\n")
+      if not(options.queue == "local"): jobfile.write("source /cvmfs/cms.cern.ch/cmsset_default.sh\n")
+      if not(options.queue == "local"): jobfile.write("cmsenv\n")
+      if not(options.queue == "local"): jobfile.write("cd %s\n"%os.getcwd())
+      jobfile.write(command + " --files %s"%(",".join(cfiles)))
+      jobfile.close()
+      iJob += 1
+      csize = 0
+      clength = 0
+      cfiles = []
+
     return iJob
 
   def doPlots(self, options):
@@ -634,7 +694,6 @@ class plotter(object):
         print("Something went wrong with %s: "%plotName, e)
 
   def doColZPlots(self, pname, options):
-
     theIndivs= []
     # Background go into the stack
     stacksize = 0
@@ -660,6 +719,7 @@ class plotter(object):
     self.draw2DColZ(pname, data, "data", options)
 
   def draw2DColZ(self, pname, histo, sname, options):
+    if sname == "data" and options.blind: return
     p = self.plots[pname]
     c = ROOT.TCanvas(pname,pname, 900,600)
     p1 = ROOT.TPad("mainpad", "mainpad", 0, 0, 1, 1)
@@ -680,10 +740,10 @@ class plotter(object):
     if "minZ" in p:
       histo.SetMaximum(p["minZ"])
 
-    for ibin in range(1, histo.GetNbinsX()+1):
-      for jbin in range(1, histo.GetNbinsY()+1):
-        if histo.GetBinContent(ibin, jbin) < 0:
-           histo.SetBinContent(ibin, jbin, 0)
+    #for ibin in range(1, histo.GetNbinsX()+1):
+    #  for jbin in range(1, histo.GetNbinsY()+1):
+    #    if histo.GetBinContent(ibin, jbin) < 0:
+    #       histo.SetBinContent(ibin, jbin, 0)
     histo.SetTitle("")
     histo.Draw("colz")
     histo.GetXaxis().SetLabelSize(0.03)
@@ -734,7 +794,6 @@ class plotter(object):
         ttext[-1].Draw("same")
     c.SaveAs(options.plotdir +  "/" + sname + "_"  +  p["plotname"] + ".pdf")
     c.SaveAs(options.plotdir +  "/" + sname + "_"  +  p["plotname"] + ".png")
-
     # Also save in root file 
     tf = ROOT.TFile(options.plotdir + "/" + p["plotname"] + ".root", "UPDATE")
     histo.Write()
@@ -810,8 +869,14 @@ class plotter(object):
                     if test == altNameDn:
                       tmpDn = s.histos[pname+ "_" + var]["total"].Clone(altNameDn).Rebin(options.rebin) if options.rebin else s.histos[pname+ "_" + var]["total"].Clone(altNameDn)
               #print(altNameUp, tmpUp.GetName(), type(tmpUp))
-              histosToSave[altNameUp] = copy.deepcopy(tmpUp)
-              histosToSave[altNameDn] = copy.deepcopy(tmpDn)
+              if altNameUp in histosToSave: # Weird stuff for the Run II systematics
+                histosToSave[altNameUp].Add(tmpUp)  
+              else:
+                histosToSave[altNameUp] = copy.deepcopy(tmpUp)
+              if altNameDn in histosToSave:
+                histosToSave[altNameDn].Add(tmpDn)
+              else:
+                histosToSave[altNameDn] = copy.deepcopy(tmpDn)
             else:
               # In this case just read nominal
               tmpUp = s.histos[pname]["total"].Clone(altNameUp)
@@ -858,8 +923,17 @@ class plotter(object):
           if not(tmpUp) or not(tmpDn): # Catch: otherwise we wil be overwritten one histogram for each signal 
             pass
           else:
-            if tmpUp: histosToSave[altNameUp] = copy.deepcopy(tmpUp)
-            if tmpDn: histosToSave[altNameDn] = copy.deepcopy(tmpDn)
+            if tmpUp:
+              if altNameUp in histosToSave:
+                histosToSave[altNameUp].Add(tmpUp)
+              else:
+                histosToSave[altNameUp] = copy.deepcopy(tmpUp)
+            if tmpDn:
+              if altNameDn in histosToSave:
+                histosToSave[altNameDn].Add(tmpDn)
+              else:
+                histosToSave[altNameDn] = copy.deepcopy(tmpDn)
+ 
       theStacks["%sUp"%syst] = backUp
       theStacks["%sDn"%syst] = backDn
       histosToSave["%sUp"%syst] = backUp
@@ -898,7 +972,7 @@ class plotter(object):
     p = self.plots[pname]
     c = ROOT.TCanvas(pname,pname, 800,1050) if not(options.wide) else ROOT.TCanvas(pname,pname, 1600, 1050)
     # Set pads
-    p1 = ROOT.TPad("mainpad", "mainpad", 0, 0.30, 1, 1)
+    p1 = ROOT.TPad("mainpad", "mainpad", 0, 0.30 if options.doRatio else 0.00, 1, 1)
     p1.SetBottomMargin(0.025)
     p1.SetTopMargin(0.14)
     p1.SetLeftMargin(0.12)
@@ -911,12 +985,17 @@ class plotter(object):
     p1.SetLogy(True)
     if "logY" in p:
       p1.SetLogy(p["logY"])
+    if "logX" in p:
+      p1.SetLogx(p["logX"])
+    if options.doRatio:
+      p2 = ROOT.TPad("ratiopad", "ratiopad", 0, 0, 1, 0.30)
+      p2.SetTopMargin(0.01)
+      p2.SetBottomMargin(0.45)
+      p2.SetLeftMargin(0.12)
+      p2.SetFillStyle(0)
+      if "logX" in p:
+        p2.SetLogx(p["logX"])
 
-    p2 = ROOT.TPad("ratiopad", "ratiopad", 0, 0, 1, 0.30)
-    p2.SetTopMargin(0.01)
-    p2.SetBottomMargin(0.45)
-    p2.SetLeftMargin(0.12)
-    p2.SetFillStyle(0)
     if "margins" in p:
       p1.SetLeftMargin(p["margins"][2])
       p1.SetRightMargin(p["margins"][3])
@@ -927,6 +1006,7 @@ class plotter(object):
     tl.SetNColumns(2)
     if "legendPosition" in p:
       tl = ROOT.TLegend(p["legendPosition"][0], p["legendPosition"][1], p["legendPosition"][2], p["legendPosition"][3])  
+      tl.SetNColumns(2)
     # Now get the histograms and build the stack
     theStack = ROOT.THStack(pname+"_stack", pname)
     theIndivs= []
@@ -977,19 +1057,54 @@ class plotter(object):
     #print(thePlotGroupsSignal, thePlotGroupsData, thePlotGroups)
     orderedPlotGroups = sorted(GroupsYields.keys(), key=lambda x: GroupsYields[x])
     for plotgroup in (orderedPlotGroups if options.ordered else thePlotGroups):
+      if options.weightHisto:
+        print("I will now weight %s"%plotgroup)
+        tfname, thname = options.weightHisto.split(":")
+        tf = ROOT.TFile(tfname,"READ")
+        th = tf.Get(thname)
+        for ibin in range(1, thePlotGroups[plotgroup].GetNbinsX()+1):
+          print(ibin, thePlotGroups[plotgroup].GetBinContent(ibin), th.GetBinContent(th.FindBin(thePlotGroups[plotgroup].GetBinLowEdge(ibin)+0.5*thePlotGroups[plotgroup].GetBinWidth(ibin))))
+          thePlotGroups[plotgroup].SetBinContent(ibin, thePlotGroups[plotgroup].GetBinContent(ibin)*th.GetBinContent(th.FindBin(thePlotGroups[plotgroup].GetBinLowEdge(ibin)+0.5*thePlotGroups[plotgroup].GetBinWidth(ibin))))
       theStack.Add(thePlotGroups[plotgroup])
       tl.AddEntry(thePlotGroups[plotgroup], plotgroup, "f")
       stacksize += thePlotGroups[plotgroup].Integral()
     for plotgroup in thePlotGroupsSignal:
+      if options.scaleStoB:
+        print(plotgroup, "scaling", back.Integral()/max(0.00001,thePlotGroupsSignal[plotgroup].Integral()))
+        thePlotGroupsSignal[plotgroup].Scale(back.Integral()/max(0.00001,thePlotGroupsSignal[plotgroup].Integral()))
+      if options.scaleS:
+        print(thePlotGroupsSignal[plotgroup].Integral())
+        thePlotGroupsSignal[plotgroup].Scale(options.scaleS)
+        print(thePlotGroupsSignal[plotgroup].Integral())
+      if options.scaleSYields > 0:
+        if options.debug: print(plotgroup)
+        thePlotGroupsSignal[plotgroup].Scale(options.scaleSYields/thePlotGroupsSignal[plotgroup].Integral())
+      if options.AddBOnSignal:
+        thePlotGroupsSignal[plotgroup].Add(back)
+        if options.ExcludeAddBOnSignal:
+          for theBPG in (orderedPlotGroups if options.ordered else thePlotGroups):
+            print("Try to match", options.ExcludeAddBOnSignal, theBPG) 
+            if re.match(options.ExcludeAddBOnSignal, theBPG):
+              print("Will exclude %s from plot"%theBPG)
+              thePlotGroupsSignal[plotgroup].Add(-1*thePlotGroups[theBPG])
+
       theIndivs.append(thePlotGroupsSignal[plotgroup])
-      tl.AddEntry(thePlotGroupsSignal[plotgroup], plotgroup, "l")
+      tl.AddEntry(thePlotGroupsSignal[plotgroup], plotgroup if not(options.AddBOnSignal) else "Bkg.+" +plotgroup, "l")
     for plotgroup in thePlotGroupsData:
       theData.append(thePlotGroupsData[plotgroup])
       tl.AddEntry(thePlotGroupsData[plotgroup], plotgroup, "pl")
+    if options.weightHisto:
+        tfname, thname = options.weightHisto.split(":")
+        tf = ROOT.TFile(tfname,"READ")
+        th = tf.Get(thname)
+        for ibin in range(1, back.GetNbinsX()+1):
+          print(ibin, back.GetBinContent(ibin), th.GetBinContent(th.FindBin(back.GetBinLowEdge(ibin)+0.5*back.GetBinWidth(ibin))))
+          back.SetBinContent(ibin, back.GetBinContent(ibin)*th.GetBinContent(th.FindBin(back.GetBinLowEdge(ibin)+0.5*back.GetBinWidth(ibin))))
+
     backSyst = back
     if self.doSyst:
       backSyst, histosToSave = self.doSystVariations(options.systFile, pname, options, back)
-
+      
     if p["normalize"]:
       for index in range(len(theIndivs)):
         theIndivs[index].Scale(1./max(0.000001,theIndivs[index].Integral()))
@@ -1051,104 +1166,112 @@ class plotter(object):
 
     tl.Draw("same")
     if debug: print("...Main plot done")
-    # Now we go to the ratio
-    p2.cd()
+    if options.doRatio:
+      # Now we go to the ratio
+      p2.cd()
 
-    # By default S/B, data/MC, TODO: add more options
-    den  = backSyst.Clone("backsyst_ratio")
-    denForDivide = den.Clone("forDivide")
-    nums = []
-    for ind in  theIndivs + theData:
-      try:
-        nums.append(ind.Clone(ind.GetName()+ "_ratio"))
-      except:
-        if options.debug: raise
-        print("Something went wrong in the ratio...")
-    #nums = [ind.Clone(ind.GetName()+ "_ratio") for ind in  theIndivs + theData]
-    for ib in range(0, den.GetNbinsX()+1):
-      denForDivide.SetBinError(ib,0)
-    for num in nums: 
-      num.Divide(denForDivide)
+      # By default S/B, data/MC, TODO: add more options
+      den  = backSyst.Clone("backsyst_ratio")
+      denForDivide = den.Clone("forDivide")
+      nums = []
+      for ind in  theIndivs + theData:
+        try:
+          nums.append(ind.Clone(ind.GetName()+ "_ratio"))
+        except:
+          if options.debug: raise
+          print("Something went wrong in the ratio...")
+      #nums = [ind.Clone(ind.GetName()+ "_ratio") for ind in  theIndivs + theData]
+      for ib in range(0, den.GetNbinsX()+1):
+        denForDivide.SetBinError(ib,0)
+      for num in nums: 
+        num.Divide(denForDivide)
         
-    den.Divide(denForDivide)
-    den.SetLineColor(ROOT.kBlack) #ROOT.kCyan if doSyst else ROOT.kGray)
-    den.SetTitle("")
-    den.GetYaxis().SetTitle(options.ratioylabel)
-    den.GetXaxis().SetTitle(p["xlabel"])
-    den.GetYaxis().SetTitleSize(0.12)
-    den.GetYaxis().SetTitleOffset(0.32)
-    den.GetXaxis().SetTitleSize(0.12)
-    den.GetXaxis().SetLabelSize(0.1)
-    den.GetYaxis().SetLabelSize(0.06)
-    if "xbinlabels" in p:
+      den.Divide(denForDivide)
+      den.SetLineColor(ROOT.kBlack) #ROOT.kCyan if doSyst else ROOT.kGray)
+      den.SetTitle("")
+      den.GetYaxis().SetTitle(options.ratioylabel)
+      den.GetXaxis().SetTitle(p["xlabel"])
+      den.GetYaxis().SetTitleSize(0.12)
+      den.GetYaxis().SetTitleOffset(0.32)
+      den.GetXaxis().SetTitleSize(0.12)
+      den.GetXaxis().SetLabelSize(0.1)
+      den.GetYaxis().SetLabelSize(0.06)
+      if "xbinlabels" in p:
+        den.LabelsOption("v")
+        den.GetXaxis().SetTitleOffset(1.75)
+        for i in range(1,den.GetNbinsX()+1):
+          print(i, p["xbinlabels"][i-1])
+          den.GetXaxis().SetBinLabel(i, p["xbinlabels"][i-1])
+          den.GetXaxis().SetLabelSize(0.12)
+          den.GetXaxis().SetLabelOffset(0.02)
+          #den.GetXaxis().ChangeLabel(i, -1,-1,-1,-1,-1,p["xbinlabels"][i-1])
       den.LabelsOption("v")
-      den.GetXaxis().SetTitleOffset(1.75)
-      for i in range(1,den.GetNbinsX()+1):
-        den.GetXaxis().SetBinLabel(i, p["xbinlabels"][i-1])
-        den.GetXaxis().SetLabelSize(0.12)
-        den.GetXaxis().SetLabelOffset(0.02)
-        #den.GetXaxis().ChangeLabel(i, -1,-1,-1,-1,-1,p["xbinlabels"][i-1])
-    den.LabelsOption("v")
 
-    if "ratiomaxY" in p:
-      den.SetMaximum(p["ratiomaxY"] if not options.rmax else float(options.rmax))
-    if "ratiominY" in p:
-      den.SetMinimum(p["ratiominY"] if not options.rmin else float(options.rmin))
-    denbar = den.Clone(den.GetName() + "_bar")
-    denbar.SetFillColor(ROOT.kCyan if self.doSyst else ROOT.kGray)
-    denbar.SetFillStyle(1001)
-    denbar.Draw("E2")
-    if self.doSyst:
-      backratio = back.Clone("backratiostat")
-      backratio.Divide(back)
-      backratio.SetFillColor(ROOT.kGray)
-      backratio.SetLineColor(ROOT.kGray)
-      backratio.SetFillStyle(1001)
-      backratio.Draw("E2 same")
-    ncolumns = 3 if self.doSyst else 2 
-    tlr = ROOT.TLegend(0.9-0.2*ncolumns,0.89,0.9,0.97)
-    tlr.SetNColumns(ncolumns)
-    tlr.SetBorderSize(0)
-    if "legendRatioPosition" in p:
-      tlr = ROOT.TLegend(p["legendRatioPosition"][0], p["legendRatioPosition"][1], p["legendRatioPosition"][2], p["legendRatioPosition"][3])
-    if not options.fromROOT: tlr.AddEntry(denbar, "SM syst.+stat. Unc." if self.doSyst else options.ratiostatlabel, "f")
-    if self.doSyst:
-      tlr.AddEntry(backratio, options.ratiostatlabel, "f")
-    for ib in range(0, den.GetNbinsX()+1):
-      den.SetBinError(ib,0)
-      den.SetBinContent(ib, 1)
-    den.SetFillStyle(0)	
-    den.Draw("same")
-    for num in nums:
-      if options.AddBOnRatio:
-        if not("Data" in num.GetName()):
-          for ib in range(1, num.GetNbinsX()+1):
-            num.SetBinContent(ib, num.GetBinContent(ib)+1)
-      num.Draw("same" + ("hist" if options.noratiostat else "")) if not("Data" in num.GetName()) else num.Draw("Psame")
-      if "Data" in num.GetName(): 
-        tlr.AddEntry(num, "Data", "pl")
-      elif options.AddBOnRatio:
-        tlr.AddEntry(num, "S+B", "pl") 
-    if debug: print("...Ratio done")
-    if "rlines" in p:
-      rtlines = []
-      for l in p["rlines"]:
-        x1, y1, x2, y2 = l[:4]
-        rtlines.append(ROOT.TLine(x1, y1, x2, y2))
-        rtlines[-1].SetLineStyle(l[4])
-        rtlines[-1].SetLineWidth(l[5])
-        rtlines[-1].SetLineColor(l[6])
-        rtlines[-1].Draw("same")
-    if "rtext" in p:
-      rttext = []
-      for l in p["rtext"]:
-        text, coords, size, color = l
-        rttext.append(ROOT.TText(coords[0], coords[1], text))
-        rttext[-1].SetTextColor(color)
-        rttext[-1].SetTextSize(size)
-        rttext[-1].Draw("same")
+      if "ratiomaxY" in p:
+        den.SetMaximum(p["ratiomaxY"] if not options.rmax else float(options.rmax))
+      if "ratiominY" in p:
+        den.SetMinimum(p["ratiominY"] if not options.rmin else float(options.rmin))
+      denbar = den.Clone(den.GetName() + "_bar")
+      denbar.SetFillColor(ROOT.kCyan if self.doSyst else ROOT.kGray)
+      denbar.SetFillStyle(1001)
+      denbar.Draw("E2")
+      if self.doSyst:
+        backratio = back.Clone("backratiostat")
+        backratio.Divide(back)
+        backratio.SetFillColor(ROOT.kGray)
+        backratio.SetLineColor(ROOT.kGray)
+        backratio.SetFillStyle(1001)
+        backratio.Draw("E2 same")
+      ncolumns = 3 if self.doSyst else 2 
+      tlr = ROOT.TLegend(0.9-0.2*ncolumns,0.89,0.9,0.97)
+      tlr.SetNColumns(ncolumns)
+      tlr.SetBorderSize(0)
+      if "legendRatioPosition" in p:
+        tlr = ROOT.TLegend(p["legendRatioPosition"][0], p["legendRatioPosition"][1], p["legendRatioPosition"][2], p["legendRatioPosition"][3])
+      if not options.fromROOT: tlr.AddEntry(denbar, "SM syst.+stat. Unc." if self.doSyst else options.ratiostatlabel, "f")
+      if self.doSyst:
+        tlr.AddEntry(backratio, options.ratiostatlabel, "f")
+      for ib in range(0, den.GetNbinsX()+1):
+        den.SetBinError(ib,0)
+        den.SetBinContent(ib, 1)
+      den.SetFillStyle(0)	
+      den.Draw("same")
+      for num in nums:
+        if options.AddBOnRatio:
+          if not("Data" in num.GetName()):
+            for ib in range(1, num.GetNbinsX()+1):
+              num.SetBinContent(ib, num.GetBinContent(ib)+1)
+        if "Data" in num.GetName():
+          num.Draw("Psame")
+        elif options.AddBOnRatio:
+          #num.SetFillColorAlpha(num.GetColor(), 0.35)
+          num.Draw("histsame")
+        else:
+          num.Draw("same" + ("hist" if options.noratiostat else "")) 
+        if "Data" in num.GetName(): 
+          tlr.AddEntry(num, "Data", "pl")
+        elif options.AddBOnRatio:
+          tlr.AddEntry(num, "S+B", "pl") 
+      if debug: print("...Ratio done")
+      if "rlines" in p:
+        rtlines = []
+        for l in p["rlines"]:
+          x1, y1, x2, y2 = l[:4]
+          rtlines.append(ROOT.TLine(x1, y1, x2, y2))
+          rtlines[-1].SetLineStyle(l[4])
+          rtlines[-1].SetLineWidth(l[5])
+          rtlines[-1].SetLineColor(l[6])
+          rtlines[-1].Draw("same")
+      if "rtext" in p:
+        rttext = []
+        for l in p["rtext"]:
+          text, coords, size, color = l
+          rttext.append(ROOT.TText(coords[0], coords[1], text))
+          rttext[-1].SetTextColor(color)
+          rttext[-1].SetTextSize(size)
+          rttext[-1].Draw("same")
+      tlr.Draw("same")
 
-    tlr.Draw("same")
     CMS_lumi.writeExtraText = True
     CMS_lumi.lumi_13TeV = "%.1f fb^{-1}" % options.luminosity if options.luminosity > 1. else "%.0f pb^{-1}" % (options.luminosity*1000)
     if p["normalize"]: 
@@ -1168,12 +1291,19 @@ class plotter(object):
     tf = ROOT.TFile(options.plotdir + "/" + p["plotname"] + ".root", "RECREATE")
     tf.cd()
     if debug: print("File created", tf)
+    writableHistograms = {}
     for s in self.samples:
-      s.histos[pname]["total"].Write()
+      if s.histos[pname]["total"].GetName() in writableHistograms:
+        writableHistograms[ s.histos[pname]["total"].GetName()].Add( s.histos[pname]["total"])
+      else:
+        writableHistograms[ s.histos[pname]["total"].GetName()] = s.histos[pname]["total"]
+    for h in writableHistograms:
+      writableHistograms[h].Write()
     theStack.Write()
     back.Write()
     if self.doSyst:
       for h in histosToSave:
+        print("histosToSave ---------------------------->", h)
         histosToSave[h].Write()
     tf.Close()
     if debug: print("...File closed")
@@ -1187,7 +1317,7 @@ if __name__ == "__main__":
   from optparse import OptionParser
   parser = OptionParser(usage="%prog [options] samples.py plots.py") 
   parser.add_option("-l","--luminosity", dest="luminosity", type="float", default=137, help="Luminosity")
-  parser.add_option("-j","--jobs", dest="jobs", type="int", default=10, help="Number of jobs (cores to use)")
+  parser.add_option("-j","--jobs", dest="jobs", type="int", default=1, help="Number of jobs (cores to use)")
   parser.add_option("--toSave", dest="toSave", type="str", default=None, help="If active, instead of plotting save per file histograms in this folder")
   parser.add_option("--toLoad", dest="toLoad", type="str", default=None, help="If active, instead of reading hdf5 load per file histograms from this folder")
   parser.add_option("-p","--plotdir", dest="plotdir", type="string", default="./", help="Where to put the plots")
@@ -1209,6 +1339,11 @@ if __name__ == "__main__":
   parser.add_option("--rmax", dest="rmax", type="float", default=None, help="Ratio maximum")
   parser.add_option("--rmin", dest="rmin", type="float", default=None, help="Ratio minimum")
   parser.add_option("--scaleY", dest="scaleMax", type="float", default=1., help="Scale Y axis maximum by this number (useful when plotting only signal, for example)")
+  parser.add_option("--scaleStoB", dest="scaleStoB",default=False, action="store_true", help="Scale signal to background for normalization")
+  parser.add_option("--scaleS", dest="scaleS", type="float", default=1., help="Scale signal by this")
+  parser.add_option("--scaleSYields", dest="scaleSYields", type="float", default=-1., help="Scale signal to these yields")
+
+  parser.add_option("--weight-histo", dest="weightHisto", type="string", default=None, help="File:histogram, reweight the output background histograms base on target histogram")
   parser.add_option("--noratiostat", dest="noratiostat", action="store_true", default=False, help="Do not show stat uncertainties in ratios (i.e. if num/dem are fully correlated this would mean double counting")
   parser.add_option("--systFile", dest="systFile", type="string", default=None, help="Systematics configuration file")
   parser.add_option("--pretend", dest="pretend", action="store_true", default=False, help="Activate pretend mode (create submit job files but don't submit)")
@@ -1218,10 +1353,15 @@ if __name__ == "__main__":
   parser.add_option("--debug", dest="debug", default =False, action="store_true", help="If activated, turn off exception catching for full debugging")
   parser.add_option("--fromROOT", dest="fromROOT", default =False, action="store_true", help="If activated, read shapes from the toLoad file directly (i.e. a file with the global TH1F already)")
   parser.add_option("--wide", dest="wide", default =False, action="store_true", help="If activated, make long wide plots")
+  parser.add_option("--ExcludeAddBOnSignal", dest="ExcludeAddBOnSignal", default=None, help="If AddBOnRatio is activated, do not add these specific backgrounds to the signal (i.e. if our signal is replacing some of the SM bkg like an EFT modification of a SM process. Accepts a regexp expression")
+  parser.add_option("--AddBOnSignal", dest="AddBOnSignal", default =False, action="store_true", help="If activated, add background to signal")
   parser.add_option("--AddBOnRatio", dest="AddBOnRatio", default =False, action="store_true", help="If activated, add background on ratio")
-  parser.add_option("--plotAll", dest="plotAll", default =False, action="store_true", help="If activated, plot even those that are to be skipped")
-
+  parser.add_option("--plotAll", dest="plotAll", default = False, action="store_true", help="If activated, plot even those that are to be skipped")
+  parser.add_option("--doRatio", dest="doRatio", default = True, help="If activated, do the ratio (default is active)")
+  parser.add_option("--smartSplitting", dest="smartSplitting", default=False, action="store_true", help="If activivated jobs are allowed to mix samples and --batchsize just denotes the max disk space of processed samples (as proxy of needed memory)")
+  
   (options, args) = parser.parse_args()
+  options.doRatio = int(options.doRatio) > 0
   samplesFile = imp.load_source("samples",args[0])
   plotsFile   = imp.load_source("plots",  args[1])
   if not(os.path.isdir(options.plotdir)):
@@ -1324,11 +1464,23 @@ if __name__ == "__main__":
     subfile.write("output                  = %s/$(ClusterId).$(ProcId).out\n"%("%s/batchlogs"%options.jobname))
     subfile.write("error                   = %s/$(ClusterId).$(ProcId).err\n"%("%s/batchlogs"%options.jobname))
     subfile.write("log                     = %s/$(ClusterId).log\n"%("%s/batchlogs"%options.jobname))
-    subfile.write("RequestCPUs             = %i\n"%options.jobs)
+    #subfile.write("requirements = (OpSysAndVer =?= \"CentOS7\")\n")
+    subfile.write("MY.WantOS               = \"el7\"\n")
+    #subfile.write("RequestCPUs             = %i\n"%options.jobs)
     subfile.write("+JobFlavour = \"%s\"\n"%(options.queue))
     subfile.write("queue filename matching (%s/exec/_*sh)\n"%("%s"%options.jobname))
     subfile.close()
-    if not(options.pretend): os.system("condor_submit -spool submit.sub")
+    if not(options.pretend):
+      if options.queue == "local":
+        print("Running batched jobs locally, please be patient...")
+        for iJob in range(nJobs):
+          print("-----Job %i/%i"%(iJob, nJobs))
+          if options.debug:
+            os.system("sh %s/exec/_%i.sh"%(options.jobname,iJob))
+          else:
+            os.system("sh %s/exec/_%i.sh >> /dev/null"%(options.jobname,iJob))
+      else: 
+        os.system("condor_submit -spool submit.sub")
 
   else:
     thePlotter.doPlots(options)
