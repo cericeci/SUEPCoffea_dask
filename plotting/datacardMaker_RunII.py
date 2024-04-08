@@ -286,6 +286,8 @@ class datacardMaker(object):
           for j in range(self.nbins - ibin):
             newcard.write('- - ')
           newcard.write('\n')
+      else:
+        newcard.write("* autoMCStats 0 1\n")
       rout = ROOT.TFile(self.output + "/" + options.region + "%s_"%self.channel + self.samples[s]["name"] + "_shapes.root", "RECREATE")
       rout.cd()
       for ibin in range(1, self.nbins+1):
