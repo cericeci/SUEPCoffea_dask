@@ -93,6 +93,12 @@ class SUEP_cluster(processor.ProcessorABC):
                         jet_collection[field][subfield]
                     )
             else:
+                #print(field, jet_collection[field])
+                #print("---------------------------------")
+                #print("---------------------------------")
+                #print("---------------------------------")
+                #print("---------------------------------")
+
                 if not(isinstance(ak.to_numpy(jet_collection[field])[0],np.ndarray)):
                     output[field] = ak.to_numpy(jet_collection[field])
                 else:
@@ -218,7 +224,9 @@ class SUEP_cluster(processor.ProcessorABC):
             "aux1": events.Muon.genPartIdx,
             "aux2": events.Muon.pt,
             "aux3": events.Muon.nTrackerLayers,
-            "aux4": events.Muon.pt
+            "aux4": events.Muon.pt,
+            "isTight": events.Muon.tightId,
+            "isTightIso": events.Muon.pfIsoId >= 4
           }, with_name="Momentum4D")
 	
           electrons = ak.zip({
@@ -231,7 +239,9 @@ class SUEP_cluster(processor.ProcessorABC):
             "aux1": events.Electron.dEscaleUp,
             "aux2": events.Electron.dEscaleDown,
             "aux3": events.Electron.dEsigmaUp,
-            "aux4": events.Electron.dEsigmaDown
+            "aux4": events.Electron.dEsigmaDown,
+            "isTight": events.Electron.mvaFall17V2Iso_WP80,
+            "isTightIso": events.Electron.mvaFall17V2Iso_WP80
           }, with_name="Momentum4D")
         else:
           muons = ak.zip({
@@ -241,6 +251,8 @@ class SUEP_cluster(processor.ProcessorABC):
             "mass": events.Muon.mass,
             "charge": events.Muon.pdgId/(-13),
             "pdgId": events.Muon.pdgId,
+            "isTight": events.Muon.tightId,
+            "isTightIso": events.Muon.pfIsoId >= 4
           }, with_name="Momentum4D")
 
           electrons = ak.zip({
@@ -250,7 +262,14 @@ class SUEP_cluster(processor.ProcessorABC):
             "mass": events.Electron.mass,
             "charge": events.Electron.pdgId/(-11),
             "pdgId": events.Electron.pdgId,
+            "isTight": events.Electron.mvaFall17V2Iso_WP80,
+            "isTightIso": events.Electron.mvaFall17V2Iso_WP80
           }, with_name="Momentum4D")
+
+
+        ##################
+        ## HLT Matching ##
+        ##################
 
         ###  Some very simple selections on ID ###
         ###  Muons: loose ID + dxy dz cuts mimicking the medium prompt ID https://twiki.cern.ch/twiki/bin/viewauth/CMS/SWGuideMuonIdRun2
@@ -289,6 +308,7 @@ class SUEP_cluster(processor.ProcessorABC):
             events = events[cutHasTwoLeps]
             selElectrons = selElectrons[cutHasTwoLeps]
             selMuons = selMuons[cutHasTwoLeps]
+
         return events, selElectrons, selMuons 
 
     def selectByJets(self, events, leptons = [],  altJets = [], extraColls = []):
@@ -464,6 +484,7 @@ class SUEP_cluster(processor.ProcessorABC):
         else: 
             return True
 
+
     def process(self, events):
         np.random.seed(max(0,min(events.event[0], 2**31))) # This ensures reproducibility of results (i.e. for the random track dropping), while also getting different random numbers per file to avoid biases (like always dropping the first track, etc.
         debug    = True  # If we want some prints in the middle
@@ -504,16 +525,16 @@ class SUEP_cluster(processor.ProcessorABC):
         if debug: print("Applying MET requirements.... %i events in"%len(events))
         self.events = self.selectByFilters(events)
         if not(self.shouldContinueAfterCut(self.events, outputs)): return accumulator # If we have no events, we simply stop
-        if debug: print("%i events pass METFilter cuts. Applying lepton requirements...."%len(self.events))
+        if debug: print("%i events pass METFilter cuts. Applying trigger requirements...."%len(self.events))
+
+        self.events, [] = self.selectByTrigger(self.events,[])
+
+        if not(self.shouldContinueAfterCut(self.events, outputs)): return accumulator
+        if debug: print("%i events pass trigger cuts. Selecting leptons..."%len(self.events))
 
         # Lepton selection
         self.events, self.electrons, self.muons = self.selectByLeptons(self.events)[:3]
         if not(self.shouldContinueAfterCut(self.events, outputs)): return accumulator # If we have no events, we simply stop
-
-        # Trigger selection
-        if debug: print("%i events pass lepton cuts. Applying trigger requirements...."%len(self.events))
-        self.events, [self.electrons, self.muons] = self.selectByTrigger(self.events,[self.electrons, self.muons])
-        # Here we join muons and electrons into leptons and sort them by pT
         self.leptons = ak.concatenate([self.electrons, self.muons], axis=1)
         highpt_leptons = ak.argsort(self.leptons.pt, axis=1, ascending=False, stable=True)
         self.leptons = self.leptons[highpt_leptons]
@@ -521,8 +542,8 @@ class SUEP_cluster(processor.ProcessorABC):
         self.muons     = self.muons[ak.argsort(self.muons.pt, axis=1, ascending=False, stable=True)]
 
 
-        if not(self.shouldContinueAfterCut(self.events, outputs)): return accumulator
-        if debug: print("%i events pass trigger cuts. Selecting jets..."%len(self.events))
+        # Trigger selection
+        if debug: print("%i events pass lepton cuts. Applying jet requirements...."%len(self.events))
 
         # Jet selection
         self.events, self.jets = self.selectByJets(self.events, self.leptons)[:2] # Leptons are needed to do jet-lepton cleaning
@@ -575,11 +596,12 @@ class SUEP_cluster(processor.ProcessorABC):
         self.jetsVar   = {"": self.jets}   # If not activated, always central jet collection
         self.tracksVar = {"": self.tracks} # If not activated, always central jet collection
         self.lepsVar   = {"": self.leptons}# If not activated, always central lepton collection
-        self.varsToDo = [""]           # If not activated just do nominal yields
+        self.varsToDo = [""]               # If not activated just do nominal yields
+        #self.jetsVar = self.doJECJERVariations(self.events, self.jets, True)
         if self.do_syst:
           self.isrweights  = self.doISRWeights(self.events)                                  # Does not change selection
           if self.isSignal: 
-            self.jetsVar     = self.doJECJERVariations(self.events, self.jets)                 # Does change selection, entry "" is central jets, entry "JECX" is JECUp/JECDown, entry "JERX" is JERUp/JerDown
+            self.jetsVar     = self.doJECJERVariations(self.events, self.jets, False)                 # Does change selection, entry "" is central jets, entry "JECX" is JECUp/JECDown, entry "JERX" is JERUp/JerDown
             self.lepsVar     = self.doLeptonScaleVariations(self.events, self.leptons)
 
           if self.doTracks: 
@@ -608,7 +630,6 @@ class SUEP_cluster(processor.ProcessorABC):
         # ------------------------------- SELECTION + PLOTTING -------------------------
         # ------------------------------------------------------------------------------
         self.var = "" # To keep track of the systematic variation: "" == nominal
-
         if len(self.varsToDo) > 1:
             self.saveAllCollections()
         for var in self.varsToDo:
@@ -618,6 +639,7 @@ class SUEP_cluster(processor.ProcessorABC):
                 highpt_jets = ak.argsort(self.jets.pt, axis=1, ascending=False, stable=True)
                 self.jets = self.jets[highpt_jets]
                 self.jets = self.jets[(self.jets.pt >= 30)]
+
             if len(self.varsToDo) > 1: 
                 self.resetAllCollections()
                 self.jets = self.jetsVar[""]
@@ -668,7 +690,7 @@ class SUEP_cluster(processor.ProcessorABC):
                        "mass": self.constituents.mass,
                        "pdgId": ak.unflatten(self.tracks.pdgId[ak.flatten(clidx,axis=2)], ak.flatten(ak.num(self.constituents, axis=2)), axis=1),
                        }, with_name="Momentum4D")
-                      print(self.constituents.pt, self.constituents.pdgId)
+                      #print(self.constituents.pt, self.constituents.pdgId)
                     outputs["onecluster"+var] = [self.doAllPlots("onecluster"+var, debug), self.events]
                     if not(self.shouldContinueAfterCut(self.events, outputs)): continue
                     if debug: print("%i events pass onecluster cuts. Doing more stuff..."%len(self.events))
@@ -1061,10 +1083,14 @@ class SUEP_cluster(processor.ProcessorABC):
         return effs
 
 
-    def doJECJERVariations(self, events, jets):
+    def doJECJERVariations(self, events, jets, onlyCentral):
         jets_corrected = apply_jecs(isMC=self.isMC, Sample=self.sample, era=self.era, events=events, doStoc=False)
         #print(jets_corrected["JES_jes"].__dict__)
-        jetsOut = {"":       self.selectByJets(events, self.leptons, jets_corrected)[1],
+        if onlyCentral:
+            jetsOut = {"":       self.selectByJets(events, self.leptons, jets_corrected)[1],
+                  }
+        else:
+            jetsOut = {"":       self.selectByJets(events, self.leptons, jets_corrected)[1],
                    "_JECUP": self.selectByJets(events, self.leptons, jets_corrected["JES_jes"].up)[1],
                    "_JECDOWN": self.selectByJets(events, self.leptons, jets_corrected["JES_jes"].down)[1],
                    "_JERUP": self.selectByJets(events, self.leptons, jets_corrected["JER"].up)[1],
@@ -1111,6 +1137,9 @@ class SUEP_cluster(processor.ProcessorABC):
             "phi": muons.phi,
             "mass": muons.mass,
             "charge": muons.pdgId/(-13),
+            "pdgId": muons.pdgId,
+            "isTight": muons.isTight,
+            "isTightIso": muons.isTightIso
         }, with_name="Momentum4D")
 
         muUp = ak.zip({
@@ -1119,6 +1148,9 @@ class SUEP_cluster(processor.ProcessorABC):
             "phi": muons.phi,
             "mass": muons.mass,
             "charge": muons.pdgId/(-13),
+            "pdgId": muons.pdgId,
+            "isTight": muons.isTight,
+            "isTightIso": muons.isTightIso
         }, with_name="Momentum4D")
         muDn = ak.zip({
             "pt": muons.pt*(muSF-muSFErr),
@@ -1126,6 +1158,9 @@ class SUEP_cluster(processor.ProcessorABC):
             "phi": muons.phi,
             "mass": muons.mass,
             "charge": muons.pdgId/(-13),
+            "pdgId": muons.pdgId,
+            "isTight": muons.isTight,
+            "isTightIso": muons.isTightIso
         }, with_name="Momentum4D")
 
         ## Now the electrons
@@ -1137,6 +1172,9 @@ class SUEP_cluster(processor.ProcessorABC):
             "phi": electrons.phi,
             "mass": electrons.mass,
             "charge": electrons.pdgId/(-13),
+            "pdgId": electrons.pdgId,
+            "isTight": electrons.isTight,
+            "isTightIso": electrons.isTightIso
         }, with_name="Momentum4D")
 
         elScaleUp = ak.zip({
@@ -1145,6 +1183,9 @@ class SUEP_cluster(processor.ProcessorABC):
             "phi": electrons.phi,
             "mass": electrons.mass,
             "charge": electrons.pdgId/(-13),
+            "pdgId": electrons.pdgId,
+            "isTight": electrons.isTight,
+            "isTightIso": electrons.isTightIso
         }, with_name="Momentum4D")
 
         elScaleDn = ak.zip({
@@ -1153,6 +1194,9 @@ class SUEP_cluster(processor.ProcessorABC):
             "phi": electrons.phi,
             "mass": electrons.mass,
             "charge": electrons.pdgId/(-13),
+            "pdgId": electrons.pdgId,
+            "isTight": electrons.isTight,
+            "isTightIso": electrons.isTightIso
         }, with_name="Momentum4D")
 
         elSigmaUp = ak.zip({
@@ -1161,6 +1205,9 @@ class SUEP_cluster(processor.ProcessorABC):
             "phi": electrons.phi,
             "mass": electrons.mass,
             "charge": electrons.pdgId/(-13),
+            "pdgId": electrons.pdgId,
+            "isTight": electrons.isTight,
+            "isTightIso": electrons.isTightIso
         }, with_name="Momentum4D")
 
         elSigmaDn = ak.zip({
@@ -1169,6 +1216,9 @@ class SUEP_cluster(processor.ProcessorABC):
             "phi": electrons.phi,
             "mass": electrons.mass,
             "charge": electrons.pdgId/(-13),
+            "pdgId": electrons.pdgId,
+            "isTight": electrons.isTight,
+            "isTightIso": electrons.isTightIso
         }, with_name="Momentum4D")
 
         # Reassign
@@ -1202,6 +1252,53 @@ class SUEP_cluster(processor.ProcessorABC):
         return lepsOut
 
 
+    def isHLTMatched(self,events, leptons):
+        trigObj = ak.zip({
+            "pt": events.TrigObj.pt,
+            "eta": events.TrigObj.eta,
+            "phi": events.TrigObj.phi,
+            "mass": 0.,
+            "id": events.TrigObj.id,
+            "filterBits": events.TrigObj.filterBits
+        }, with_name="Momentum4D")
+        #for i in range(3215, 3218):
+        #    print(i, ak.type(trigObj[i]))
+        #    print(i, 0, trigObj[i][0])
+        trigObjSingleMu = trigObj[ ((abs(trigObj.id)==13) & ((trigObj.filterBits & 2) | (trigObj.filterBits & 8)))]
+        trigObjDoubleMu = trigObj[ ((abs(trigObj.id)==13) & (trigObj.filterBits & 16))]
+        trigObjSingleEl = trigObj[ ((abs(trigObj.id)==11) & ((trigObj.filterBits & 2) | (trigObj.filterBits & 4) | (trigObj.filterBits & 1024)))]
+        trigObjDoubleEl = trigObj[ ((abs(trigObj.id)==11) & (trigObj.filterBits & 16))]
+
+        toMatch2mu, trigObjDoubleMu = ak.unzip(ak.cartesian([leptons[abs(leptons.pdgId) == 13], trigObjDoubleMu], axis=1, nested=True))
+        alldr2                      = toMatch2mu.deltaR2(trigObjDoubleMu)
+        match2mu                    = (ak.sum(ak.where(ak.min(alldr2, axis=2) < 0.1, True, False), axis = 1) >= 2)
+
+        toMatch1mu, trigObjSingleMu = ak.unzip(ak.cartesian([leptons[abs(leptons.pdgId) == 13], trigObjSingleMu], axis=1, nested=True))
+        alldr2                      = toMatch1mu.deltaR2(trigObjSingleMu)
+        match1mu                    = (ak.sum(ak.where(ak.min(alldr2, axis=2) < 0.1, True, False), axis = 1) >= 1)
+
+        print(ak.type(trigObjDoubleEl), ak.type(leptons[abs(leptons.pdgId) == 11]))
+        #for i in range(3215, 3218):
+        #    print(events.run[i], events.luminosityBlock[i], events.event[i])
+        #    print(i,ak.type(trigObjDoubleEl[i]))
+        #    print(i, trigObjDoubleEl[i][0]) 
+        toMatch2El, trigObjDoubleEl = ak.unzip(ak.cartesian([leptons[abs(leptons.pdgId) == 11], trigObjDoubleEl], axis=1, nested=True))
+        #for i in range(3215, 3218):
+        #    print(i,ak.type(trigObjDoubleEl[i]), ak.type(toMatch2El[i]))
+        #    for j in range(2):
+        #      print(i, j, toMatch2El[i][j])
+        #      print(i, j, trigObjDoubleEl[i][j])
+        #    print("---------------------------------")
+        #    trigObjDoubleEl[i].deltaR2(toMatch2El[i])
+        alldr2                      = toMatch2El.deltaR2(trigObjDoubleEl)
+        match2El                    = (ak.sum(ak.where(ak.min(alldr2, axis=2) < 0.1, True, False), axis = 1) >= 2)
+
+        toMatch1El, trigObjSingleEl = ak.unzip(ak.cartesian([leptons[abs(leptons.pdgId) == 11], trigObjSingleEl], axis=1, nested=True))
+        alldr2                      = toMatch1El.deltaR2(trigObjSingleEl)
+        match1El                    = (ak.sum(ak.where(ak.min(alldr2, axis=2) < 0.1, True, False), axis = 1) >= 1)
+
+        return (match2mu | match1mu | match2El | match1El)
+
     def doAllPlots(self, channel, debug=True):
         # ------------------------------------------------------------------------------
         # ------------------------------- PLOTTING -------------------------------------
@@ -1220,7 +1317,12 @@ class SUEP_cluster(processor.ProcessorABC):
         out["nleptons"]      = ak.num(self.leptons, axis=1)[:]
         out["nmuons"]        = ak.num(self.muons) 
         out["nelectrons"]    = ak.num(self.electrons)
+        out["isHLTMatch"]    = self.isHLTMatched(self.events, self.leptons)[:]
+        out["leadlep_isTight"] = self.leptons.isTight[:,0]
+        out["leadlep_isTightIso"] = self.leptons.isTightIso[:,0]
 
+        out["subleadlep_isTight"] = self.leptons.isTight[:,1]
+        out["subleadlep_isTightIso"] = self.leptons.isTightIso[:,0]
 
         # Object: reconstructed Z
         out["Z_pt"]  = self.Zcands.pt[:]
@@ -1236,18 +1338,33 @@ class SUEP_cluster(processor.ProcessorABC):
         out["leadjet_pt"]     = ak.fill_none(ak.pad_none(self.jets.pt,  1, axis=1, clip=True), 0.)[:,0] # So take all events, if there is no jet_pt fill it with none, then replace none with 0
         out["leadjet_eta"]    = ak.fill_none(ak.pad_none(self.jets.eta, 1, axis=1, clip=True), -999)[:,0] # So take all events, if there is no jet_pt fill it with none, then replace none with -999
         out["leadjet_phi"]    = ak.fill_none(ak.pad_none(self.jets.phi, 1, axis=1, clip=True), -999)[:,0] # So take all events, if there is no jet_pt fill it with none, then replace none with -999
-        out["leadjet_qgl"]    = ak.fill_none(ak.pad_none(self.jets.QGL,  1, axis=1, clip=True), -999)[:,0] # So take all events, if there is no jet_pt fill it with none, then replace none with -999
         out["subleadjet_pt"]  = ak.fill_none(ak.pad_none(self.jets.pt,  2, axis=1, clip=True), 0.)[:,1] # So take all events, if there is no jet_pt fill it with none, then replace none with 0
         out["subleadjet_eta"] = ak.fill_none(ak.pad_none(self.jets.eta, 2, axis=1, clip=True), -999)[:,1] # So take all events, if there is no jet_pt fill it with none, then replace none with -999
         out["subleadjet_phi"] = ak.fill_none(ak.pad_none(self.jets.phi, 2, axis=1, clip=True), -999)[:,1] # So take all events, if there is no jet_pt fill it with none, then replace none with -999
-        out["subleadjet_qgl"] = ak.fill_none(ak.pad_none(self.jets.QGL,  2, axis=1, clip=True), -999)[:,1] # So take all events, if there is no jet_pt fill it with none, then replace none with -999
         out["trailjet_pt"]    = ak.fill_none(ak.pad_none(self.jets.pt,  3, axis=1, clip=True), 0.)[:,2] # So take all events, if there is no jet_pt fill it with none, then replace none with 0
         out["trailjet_eta"]   = ak.fill_none(ak.pad_none(self.jets.eta, 3, axis=1, clip=True), -999)[:,2] # So take all events, if there is no jet_pt fill it with none, then replace none with -999
         out["trailjet_phi"]   = ak.fill_none(ak.pad_none(self.jets.phi, 3, axis=1, clip=True), -999)[:,2] # So take all events, if there is no jet_pt fill it with none, then replace none with -999
-        out["trailjet_qgl"]   = ak.fill_none(ak.pad_none(self.jets.QGL,  3, axis=1, clip=True), -999.)[:,2] # So take all events, if there is no jet_pt fill it with none, then replace none with -999
         out["H_T"]            = ak.sum(self.jets.pt, axis=1)[:]
+        out["leadjet_qgl"] = ak.fill_none(ak.pad_none(self.jets.QGL, 1, axis=1, clip=True), -999)[:,0]
+        out["subleadjet_qgl"] = ak.fill_none(ak.pad_none(self.jets.QGL, 2, axis=1, clip=True), -999)[:,1]
+        out["trailjet_qgl"] = ak.fill_none(ak.pad_none(self.jets.QGL, 3, axis=1, clip=True), -999)[:,2]
         out["L_T"]            = ak.sum(self.leptons.pt, axis=1)[:]
         out["MET_pt"]         = self.events.MET.pt[:] # Just in case
+
+        #########################################
+        # Overlap bits and alternative overlaps #
+        #########################################
+
+        out["SUEP_anyak4_overlap"]    = ak.any(self.clusters[:,0].deltaR(self.jets) < 1.5, axis=1)[:]
+        out["SUEP_anyak4_overlap"]    = ak.sum(self.clusters[:,0].deltaR(self.jets) < 1.5, axis=1)[:]
+        out["SUEP_anyak4_overlap_ID"] = ak.fill_none(ak.argmin(self.clusters[:,0].deltaR(self.jets), axis=1)[:],-1)[:] # Aka, the index of the jet that more closely aligns with the SUEP
+        print(ak.argmin(self.clusters[:,0].deltaR(self.jets), axis=1))
+        print(ak.fill_none(ak.argmin(self.clusters[:,0].deltaR(self.jets), axis=1), 0))
+        toreadpt = ak.fill_none(ak.pad_none(self.jets.pt,  1, axis=1, clip=False), 0.)
+        out["SUEP_anyak4_overlap_pt"] = np.array([toreadpt[kkk] for kkk in  [(iii, jjj) for iii, jjj in enumerate(ak.fill_none(ak.argmin(self.clusters[:,0].deltaR(self.jets), axis=1), 0))]]) # Aka, the pT of the jet that more closely aligns with the SUEP
+        out["SUEP_anyak4_overlap_HT"] = ak.sum(self.jets.pt[self.clusters[:,0].deltaR(self.jets) < 1.5], axis=1)[:] # Aka, the sum of the pT of all the jets that align with the SUEP
+        out["SUEP_leadak4_overlap"]   = ak.fill_none(ak.pad_none((self.clusters[:,0].deltaR(self.jets) < 1.5), 1, axis=1, clip=True), 0)[:,0] 
+
 
         # Corrections
         if self.isMC:
@@ -1301,6 +1418,11 @@ class SUEP_cluster(processor.ProcessorABC):
                     out["leadcluster_npion"]   = ak.sum(abs(self.constituents.pdgId[:,0,:]) == 211, axis = 1)
                     out["leadcluster_nkaon"]   = ak.sum((abs(self.constituents.pdgId[:,0])-310) < 15, axis = 1)
 
+                    """modeBins = [0.1] #[0.01,0.02,0.05,0.1,0.2]
+                    masses, fourmasses = self.getAllMassPairsMode(self.constituents[:,0], modeBins=modeBins, minn=0, maxx=100)
+                    for b in modeBins:
+                      out["leadcluster_modemass_%1.2f"%(b)] = masses[b][:]
+                      out["leadcluster_modemass4_%1.2f"%(b)] = fourmasses[b][:]"""
                     out["leadcluster_m"]     = self.clusters.mass[:,0]
 
                     boost_leading = ak.zip({
@@ -1337,9 +1459,9 @@ class SUEP_cluster(processor.ProcessorABC):
     def getNPU(self):
         if self.isMC:
             if hasattr(self.events, "Pileup"):
-                return self.events.Pileup.nTrueInt
+              return self.events.Pileup.nTrueInt
             else:
-                return ak.ones_like(self.events.genWeight)
+              return ak.ones_like(self.events.genWeight)
         else:
             if self.era == 2015  or self.era == 2016:
                 lumifile = "data/Lumi/16.json"
@@ -1361,4 +1483,49 @@ class SUEP_cluster(processor.ProcessorABC):
 
     def postprocess(self, accumulator):
         return accumulator
+
+    def getAllMassPairsMode(self, tracks, modeBins=[], minn=0, maxx=20):
+        # This is so incredibly slow...
+        trackpairs   = ak.combinations(tracks,2, fields=["track1","track2"])
+        trackindexes = ak.argcombinations(tracks, 2, fields=["itrack1", "itrack2"])
+
+        ditracks   = trackpairs.track1 + trackpairs.track2
+        masses     = ditracks.mass
+        areOF      = ((trackpairs.track1.pdgId + trackpairs.track2.pdgId) == 0)
+
+        masses    = masses[areOF]
+        indexes   = trackindexes[areOF]
+        mWidth    = 0.01 # Maximum width
+        dimasses     = ak.combinations(masses, 2, fields=["mass1", "mass2"])
+        dimassesargs = ak.argcombinations(masses, 2, fields=["imass1", "imass2"])
+
+        matchMassCut = abs(dimasses.mass1 - dimasses.mass2) < mWidth
+        
+        # Indexes of the fourth tracks
+        fInd = ak.zip({
+            "one"  : indexes.itrack1[dimassesargs.imass1[matchMassCut]],
+            "two"  : indexes.itrack1[dimassesargs.imass2[matchMassCut]],
+            "three": indexes.itrack2[dimassesargs.imass1[matchMassCut]],
+            "four" : indexes.itrack2[dimassesargs.imass2[matchMassCut]]
+            })
+        cutRepeated = ((fInd.one != fInd.two) & (fInd.one != fInd.three) & (fInd.one != fInd.four) & (fInd.two != fInd.three) & (fInd.two != fInd.four) & (fInd.three != fInd.four))
+        fInd = fInd[cutRepeated]
+        FourObjects = tracks[fInd.one] + tracks[fInd.two] + tracks[fInd.three] + tracks[fInd.four]
+        FourMass = FourObjects.mass
+
+        vals = {i : np.array([]) for i in modeBins}
+        valsf = {i : np.array([]) for i in modeBins}
+        bins = {i : np.arange(minn, maxx, i) for i in modeBins}
+        for iEv in range(ak.num(tracks, axis=0)):
+          if iEv%100 == 0: print("Computing modes for %i/%i"%(iEv, ak.num(tracks, axis=0)))
+          first = True
+          for v in modeBins:
+            hb, b = np.histogram(masses[iEv,:], bins=bins[v])
+            vals[v] = np.append(vals[v],b[np.argmax(hb)])
+            hff, ff = np.histogram(FourMass[iEv,:], bins=bins[v])
+            valsf[v] = np.append(valsf[v], ff[np.argmax(hff)])
+            if first:
+                first = False
  
+        #print("RETURN:", vals, len(vals))
+        return vals, valsf
