@@ -6,15 +6,15 @@ systematicsAndShapes = {
            "match": "[VAR]_[CHANNEL]_$PROCESS",
            "extendedABCD": {"SR": "_SR", "B1": "_B1", "B2":"_B2", "C1":"_C1", "C2":"_C2", "D1":"_D1", "D2":"_D2","E1":"_E1", "E2":"_E2"}
  },
- "TrigSF"  : {
-            "name": "TrigSF",
-            "type": "shape",
-            "processes": ["SUEP_.*"],
-            "match": "$PROCESS_$SYSTEMATIC",
-            "up"  : "Up",
-            "down": "Dn",
-            "corrs": {"2016":["2016"], "2016APV":["2016APV"], "2017":["2017"],"2018":["2018"]},
- },
+# "TrigSF"  : {
+#            "name": "TrigSF",
+#            "type": "shape",
+#            "processes": ["SUEP_.*"],
+#            "match": "$PROCESS_$SYSTEMATIC",
+#            "up"  : "Up",
+#            "down": "Dn",
+#            "corrs": {"2016":["2016"], "2016APV":["2016APV"], "2017":["2017"],"2018":["2018"]},
+# },
  "ElSF"  : {
             "name": "ElSF",
             "type": "shape",
@@ -41,6 +41,7 @@ systematicsAndShapes = {
             "up"  : "Up",
             "down": "Dn",
             "corrs": {"RunII":["2016","2016APV","2017","2018"]},
+            "flatten": [['SR_bin1', 'B1_bin1', 'B2_bin1'], ['SR_bin2', 'B1_bin2', 'B2_bin2'], ['SR_bin3', 'B1_bin3', 'B2_bin3'], ['SR_bin4', 'B1_bin4', 'B2_bin4'], ['SR_bin5', 'B1_bin5', 'B2_bin5'], ['SR_bin6', 'B1_bin6', 'B2_bin6'], ['SR_bin7', 'B1_bin7', 'B2_bin7'], ['SR_bin8', 'B1_bin8', 'B2_bin8'], ['E1_bin1','D1_bin1','C1_bin1'], ['E2_bin1','D2_bin1','C2_bin1']],
  },
  "L1"  : {
             "name": "L1",
@@ -59,6 +60,7 @@ systematicsAndShapes = {
             "up"  : "Up",
             "down": "Dn",
             "corrs": {"RunII":["2016","2016APV","2017","2018"]},
+            "flatten": [["E2_bin1","E1_bin1",'B2_bin1', 'B2_bin2', 'B2_bin3', 'B2_bin4', 'B2_bin5', 'B2_bin6', 'B2_bin7', 'B2_bin8'],["D2_bin1","D1_bin1",'B1_bin1', 'B1_bin2', 'B1_bin3', 'B1_bin4', 'B1_bin5', 'B1_bin6', 'B1_bin7', 'B1_bin8'],["C1_bin1","C2_bin1",'SR_bin1', 'SR_bin2', 'SR_bin3', 'SR_bin4', 'SR_bin5', 'SR_bin6', 'SR_bin7', 'SR_bin8']],
  },
  "FSR"  : {
             "name": "FSR",
@@ -68,6 +70,7 @@ systematicsAndShapes = {
             "up"  : "Up",
             "down": "Dn",
             "corrs": {"RunII":["2016","2016APV","2017","2018"]},
+            "flatten": [["E2_bin1","E1_bin1",'B2_bin1', 'B2_bin2', 'B2_bin3', 'B2_bin4', 'B2_bin5', 'B2_bin6', 'B2_bin7', 'B2_bin8'],["D2_bin1","D1_bin1",'B1_bin1', 'B1_bin2', 'B1_bin3', 'B1_bin4', 'B1_bin5', 'B1_bin6', 'B1_bin7', 'B1_bin8'],["C1_bin1","C2_bin1",'SR_bin1', 'SR_bin2', 'SR_bin3', 'SR_bin4', 'SR_bin5', 'SR_bin6', 'SR_bin7', 'SR_bin8']],
  },
  "LFCorr"  : {
             "name": "LFCorr",
@@ -114,6 +117,7 @@ systematicsAndShapes = {
             "up"  : "_TrackUp",
             "down": "",
             "corrs": {"RunII":["2016","2016APV","2017","2018"]},
+            "flatten": [['SR_bin1', 'B1_bin1', 'B2_bin1'], ['SR_bin2', 'B1_bin2', 'B2_bin2'], ['SR_bin3', 'B1_bin3', 'B2_bin3'], ['SR_bin4', 'B1_bin4', 'B2_bin4'], ['SR_bin5', 'B1_bin5', 'B2_bin5'], ['SR_bin6', 'B1_bin6', 'B2_bin6'], ['SR_bin7', 'B1_bin7', 'B2_bin7'], ['SR_bin8', 'B1_bin8', 'B2_bin8'], ['E1_bin1','D1_bin1','C1_bin1'], ['E2_bin1','D2_bin1','C2_bin1']],
  },
 # "JEC"  : {
 #            "name": "JEC",
