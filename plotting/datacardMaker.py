@@ -321,18 +321,16 @@ class datacardMaker(object):
  
       if options.ManualMC:
         for ibin in range(1, self.nbins + 1):
-          #if self.channel == 'SR':
-          #  signal = self.tf.Get("leadclustertracks_onecluster_" + self.samples[ss]["name"])
-          #else:
-          #  signal = self.tf.Get("leadclustertracks_" + self.channel + "_"+ self.samples[ss]["name"])
+          willWrite = False
+          toWrite = ""
           signal = self.th1s[s]
           if signal.GetBinError(ibin) == 0:
             rawMC = 0
           else:
             rawMC = (signal.GetBinContent(ibin)/signal.GetBinError(ibin))**2
-          newcard.write("ManualMCStats_bin"+ str(ibin) + "_" + str(options.year) + "_" + str(options.region) + "_" + self.channel + " gmN " + str(int(rawMC)) + " ")
+          toWrite = "ManualMCStats_bin"+ str(ibin) + "_" + str(options.year) + "_" + str(options.region) + "_" + self.channel + " gmN " + str(int(rawMC)) + " "
           for j in range(ibin-1):
-            newcard.write('- - ')
+            toWrite += '- - '
           if rawMC == 0 and self.channel in ["B1","B2","SR"]:
             # Now we run the choppy binning search algorithm
             needsgmN = False
@@ -340,6 +338,7 @@ class datacardMaker(object):
             elif (ibin == self.nbins) and  (2*signal.GetBinContent(self.nbins-1)-signal.GetBinContent(self.nbins-2)) > 0: needsgmN = True
             elif (ibin != 1) and (ibin != self.nbins) and (signal.GetBinContent(ibin+1) > 0) and (signal.GetBinContent(ibin-1) > 0): needsgmN = True
             if needsgmN:
+              willWrite = True
               print("Choppiness detected in bin %i for channel %s, added gmN 0"%(ibin, self.channel))
               if options.year == '2018':
                 val = 5252.99 / 150000
@@ -349,12 +348,17 @@ class datacardMaker(object):
                 val = 1438.31 / 75000
               elif options.year == '2016APV':
                 val = 1745.15 / 75000
-              newcard.write(str(val) + ' - ')
+              toWrite += str(val) + ' - '
+          elif rawMC != 0:
+            willWrite = True
+            toWrite += str(signal.GetBinContent(ibin)/rawMC) + ' - '
           else:
-            newcard.write(str(signal.GetBinContent(ibin)/rawMC) + ' - ')
+            toWrite += '- - '
           for j in range(self.nbins - ibin):
-            newcard.write('- - ')
-          newcard.write('\n')
+            toWrite += '- - '
+          toWrite += '\n'
+          if willWrite:
+              newcard.write(toWrite)
       rout = ROOT.TFile(self.output + "/" + options.region + "%s_"%self.channel + self.samples[s]["name"] + "_shapes.root", "RECREATE")
       rout.cd()
       for ibin in range(1, self.nbins+1):
