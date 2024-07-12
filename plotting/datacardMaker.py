@@ -328,14 +328,14 @@ class datacardMaker(object):
             rawMC = 0
           else:
             rawMC = (signal.GetBinContent(ibin)/signal.GetBinError(ibin))**2
-          toWrite = "ManualMCStats_bin"+ str(ibin) + "_" + str(options.year) + "_" + str(options.region) + "_" + self.channel + " gmN " + str(int(rawMC)) + " "
+          toWrite = "ManualMCStats_bin"+ str(ibin) + "_" + str(options.year) + "_" + str(options.region) + "_" + self.channel + " gmN " + str(int(round(rawMC))) + " "
           for j in range(ibin-1):
             toWrite += '- - '
           if rawMC == 0 and self.channel in ["B1","B2","SR"]:
             # Now we run the choppy binning search algorithm
             needsgmN = False
-            if (ibin == 1) and (2*signal.GetBinContent(2)-signal.GetBinContent(3)) > 0: needsgmN = True
-            elif (ibin == self.nbins) and  (2*signal.GetBinContent(self.nbins-1)-signal.GetBinContent(self.nbins-2)) > 0: needsgmN = True
+            if (ibin == 1) and (2*signal.GetBinContent(2)-signal.GetBinContent(3)) > 0 and (signal.GetBinContent(2) > 0 and signal.GetBinContent(3)> 0) : needsgmN = True
+            elif (ibin == self.nbins) and  (2*signal.GetBinContent(self.nbins-1)-signal.GetBinContent(self.nbins-2)) > 0 and  (signal.GetBinContent(self.nbins-1) > 0 and signal.GetBinContent(self.nbins-2)> 0): needsgmN = True
             elif (ibin != 1) and (ibin != self.nbins) and (signal.GetBinContent(ibin+1) > 0) and (signal.GetBinContent(ibin-1) > 0): needsgmN = True
             if needsgmN:
               willWrite = True
