@@ -18,9 +18,26 @@ class datacardMaker(object):
     self.backgr  = []
     self.data    = []
     self.channel = channel
+    self.doAgnostic = (options.agnostic >= 0)
+    self.agnosticBin = options.agnostic
+    if self.doAgnostic: # Create dummy one
+      toDelete = []
+      for s in samples:
+        if "isSig" in self.samples[s] and self.doAgnostic:
+          if self.samples[s]["isSig"]:
+            toDelete.append(s)
+      for d in toDelete:
+        del self.samples[d]
+
+      self.samples["agnostic"] =  {
+         "name"     : "agnostic", #Here plain text
+         "label"    : "agnostic", #Here we can use weird glyphs
+         "isSig"    : True,
+         "doPlot"   : False,}
   def createDatacards(self):
     self.collectYields()
     for s in self.samples:
+      first = True
       if "isSig" in self.samples[s]:
         if self.samples[s]["isSig"]:
           if self.options.thispoint:
@@ -123,10 +140,10 @@ class datacardMaker(object):
               newdn = self.tf.Get(self.systs[syst]["match"].replace("$PROCESS", self.samples[pr]["name"]).replace("[VAR]", self.options.var).replace("$SYSTEMATIC",syst).replace("[CHANNEL]", self.channel) + self.systs[syst]["down"])
               self.th1s[pr + syst + "Up"] = copy.deepcopy(newup.Clone(pr + name + "Up"))
               self.th1s[pr + syst + "Down"] = copy.deepcopy(newdn.Clone(pr + name + "Down"))
-              #if (self.th1s[pr + syst + "Up"].Integral() < 0.0001) or (self.th1s[pr + syst + "Down"].Integral() < 0.0001):
+              #if (self.th1s[pr + syst + "Up"].Integral() < 1e-9) or (self.th1s[pr + syst + "Down"].Integral() < 1e-9):
               for ibin in range(1, self.th1s[pr + syst + "Down"].GetNbinsX()+1):
-                  if self.th1s[pr + syst + "Down"].GetBinContent(ibin) < 0.0001:  self.th1s[pr + syst + "Down"].SetBinContent(ibin,0.0001)
-                  if self.th1s[pr + syst + "Up"].GetBinContent(ibin) < 0.0001:  self.th1s[pr + syst + "Up"].SetBinContent(ibin,0.0001)
+                  if self.th1s[pr + syst + "Down"].GetBinContent(ibin) < 1e-9:  self.th1s[pr + syst + "Down"].SetBinContent(ibin,1e-9)
+                  if self.th1s[pr + syst + "Up"].GetBinContent(ibin) < 1e-9:  self.th1s[pr + syst + "Up"].SetBinContent(ibin,1e-9)
 
       if self.isShape: 
         newcard.write("* autoMCStats 0\n")
@@ -140,7 +157,7 @@ class datacardMaker(object):
           self.th1s[h].Write()
         rout.Close()
       newcard.close()
-    else:
+    else: #i.e. it is ABCD
       if os.path.isfile(self.output + "/" + options.region + "%s_"%self.channel + self.samples[s]["name"] + "_shapes.root"):
         if os.path.getsize(self.output + "/" + options.region + "%s_"%self.channel + self.samples[s]["name"] + "_shapes.root") < 100:
           os.system("rm %s"%(self.output + "/" + options.region + "%s_"%self.channel + self.samples[s]["name"] + "_shapes.root"))
@@ -155,18 +172,36 @@ class datacardMaker(object):
         newcard.write("shapes * * ./" + options.region + "%s"%self.channel + "_" + self.samples[s]["name"] + "_shapes.root $PROCESS_$CHANNEL $PROCESS_$CHANNEL_$SYSTEMATIC \n")
       newcard.write("bin " + " ".join(["%sbin%i"%(self.channel, i) for i in range(1,self.nbins+1)])  + " \n")
       newcard.write("observation " + " ".join(["-1"  for ibin in range(1, self.nbins+1)]) + " \n")
-      newcard.write("bin " + " ".join([ " ".join(["%sbin%i"%(self.channel, j) for i in range(2)]) for j in range(1,self.nbins+1)])+" \n")
-      newcard.write("process " + " ".join([s + " total_background" for i in range(self.nbins)])+"\n")
-      newcard.write("process " + " ".join(["0 1" for i in range(self.nbins)])+"\n")
-      newcard.write("rate " + " ".join(["-1 -1" for ibin in range(1, self.nbins+1)])+" \n")
+
       processes = []
       bins      = []
-      for ibin in range(1,self.nbins+1):
-        processes.append(s)
-        processes.append("total_background")
-        bins.append("%sbin%i"%(self.channel, ibin))
-        bins.append("%sbin%i"%(self.channel, ibin))
+      self.skipSigSysts = False
+      self.sigInBins = [True for i in range(self.nbins)]
+      if options.checkZeroSignal:
+        for ibin in range(1, self.nbins + 1):
+          signal = self.th1s[s]
+          if signal.GetBinError(ibin) == 0:
+            rawMC = 0
+          else:
+            rawMC = (signal.GetBinContent(ibin)/signal.GetBinError(ibin))**2
+          if rawMC < 1:
+            self.sigInBins[ibin-1] = False
+        if not(any(self.sigInBins)): self.skipSigSysts = True
+      if options.noSigCDE and not(self.channel in options.noSigCDE.split(",")):
+        self.skipSigSysts = True
+        self.sigInBins = [False]*self.nbins
 
+      newcard.write("bin " + " ".join([ " ".join(["%sbin%i"%(self.channel, j) for i in range(2 if self.sigInBins[j-1] else 1)]) for j in range(1,self.nbins+1)])+" \n")
+      newcard.write("process " + " ".join([ (s if self.sigInBins[i] else "") + " bkg" for i in range(self.nbins)])+"\n")
+      newcard.write("process " + " ".join([("0 1" if self.sigInBins[i] else " 1") for i in range(self.nbins)])+"\n")
+      newcard.write("rate " + " ".join([("-1 -1" if self.sigInBins[ibin-1] else " -1") for ibin in range(1, self.nbins+1)])+" \n")
+    
+      for ibin in range(1,self.nbins+1):
+        if self.sigInBins[ibin-1]: processes.append(s)
+        processes.append("bkg")
+        if self.sigInBins[ibin-1]: bins.append("%sbin%i"%(self.channel, ibin))
+        bins.append("%sbin%i"%(self.channel, ibin))
+        
       empty = ["-"]*len(processes)
       for syst in self.systs: # Now the fun begins:
         #print(syst)
@@ -295,8 +330,8 @@ class datacardMaker(object):
                 self.th1s_perbin[ibin][ss + syst + "Up"].Scale(varFlatUp)
                 self.th1s_perbin[ibin][ss + syst + "Down"] = self.th1s_perbin[ibin][ss].Clone("%s_%sbin%i_%sDown"%(ss, self.channel, ibin, name))
                 self.th1s_perbin[ibin][ss + syst + "Down"].Scale(varFlatDn)
-                if self.th1s_perbin[ibin][ss + syst + "Up"].GetBinContent(1) < 1e-4: self.th1s_perbin[ibin][ss + syst + "Up"].SetBinContent(1, 1e-4)
-                if self.th1s_perbin[ibin][ss + syst + "Down"].GetBinContent(1) < 1e-4: self.th1s_perbin[ibin][ss + syst + "Down"].SetBinContent(1, 1e-4)
+                if self.th1s_perbin[ibin][ss + syst + "Up"].GetBinContent(1) < 1e-9: self.th1s_perbin[ibin][ss + syst + "Up"].SetBinContent(1, 1e-9)
+                if self.th1s_perbin[ibin][ss + syst + "Down"].GetBinContent(1) < 1e-9: self.th1s_perbin[ibin][ss + syst + "Down"].SetBinContent(1, 1e-9)
                 self.th1s_perbin[ibin][ss + syst + "Up"].SetDirectory(0)
                 self.th1s_perbin[ibin][ss + syst + "Down"].SetDirectory(0)
 
@@ -304,22 +339,27 @@ class datacardMaker(object):
               for ibin in range(1, self.nbins + 1):
                 if (options.integrateBins == -1) or (ibin < options.integrateBins):
                   self.th1s_perbin[ibin][ss + syst + "Up"] = ROOT.TH1F("%s_%sbin%i_%sUp"%(ss, self.channel, ibin, name), "%s_%sbin%i_%sUp"%(ss, self.channel, ibin, name), 1, 0 , 1)
-                  self.th1s_perbin[ibin][ss + syst + "Up"].SetBinContent(1, max(0.0001, factor*newup.GetBinContent(ibin)))
+                  self.th1s_perbin[ibin][ss + syst + "Up"].SetBinContent(1, max(1e-9, factor*newup.GetBinContent(ibin)))
                   self.th1s_perbin[ibin][ss + syst + "Up"].SetBinError(1, newup.GetBinError(ibin)*factor)
                   self.th1s_perbin[ibin][ss + syst + "Down"] = ROOT.TH1F("%s_%sbin%i_%sDown"%(ss, self.channel, ibin, name), "%s_%sbin%i_%sDown"%(ss, self.channel, ibin, name), 1, 0 , 1)
-                  self.th1s_perbin[ibin][ss + syst + "Down"].SetBinContent(1, max(0.0001, factor*newdn.GetBinContent(ibin) if self.systs[syst]["down"] != "" else self.th1s_perbin[ibin][ss].GetBinContent(1)))
+                  self.th1s_perbin[ibin][ss + syst + "Down"].SetBinContent(1, max(1e-9, factor*newdn.GetBinContent(ibin) if self.systs[syst]["down"] != "" else self.th1s_perbin[ibin][ss].GetBinContent(1)))
                   self.th1s_perbin[ibin][ss + syst + "Down"].SetBinError(1, factor*newdn.GetBinError(ibin) if self.systs[syst]["down"] != "" else self.th1s_perbin[ibin][ss].GetBinError(1))
                 elif (options.integrateBins > 0) or (ibin == options.integrateBins):
                   self.th1s_perbin[ibin][ss + syst + "Up"] = ROOT.TH1F("%s_%sbin%i_%sUp"%(ss, self.channel, ibin, name), "%s_%sbin%i_%sUp"%(ss, self.channel, ibin, name), 1, 0 , 1)
                   self.th1s_perbin[ibin][ss + syst + "Down"] = ROOT.TH1F("%s_%sbin%i_%sDown"%(ss, self.channel, ibin, name), "%s_%sbin%i_%sDown"%(ss, self.channel, ibin, name), 1, 0 , 1)
+                  first = True
                   for iOldBin in range(options.integrateBins, newdn.GetNbinsX()+1):
-                      self.th1s_perbin[ibin][ss + syst + "Up"].SetBinContent(1, self.th1s_perbin[ibin][ss + syst + "Up"].GetBinContent(1) + max(0.0001, factor*newup.GetBinContent(iOldBin)))
-                      self.th1s_perbin[ibin][ss + syst + "Up"].SetBinError(1, (newup.GetBinError(iOldBin)*factor**2 + self.th1s_perbin[ibin][ss + syst + "Up"].GetBinError(1)**2)**0.5)
-                      self.th1s_perbin[ibin][ss + syst + "Down"].SetBinContent(1, self.th1s_perbin[ibin][ss + syst + "Down"].GetBinContent(1) + max(0.0001, factor*newdn.GetBinContent(iOldBin)))
-                      self.th1s_perbin[ibin][ss + syst + "Down"].SetBinError(1, (newdn.GetBinError(iOldBin)*factor**2 + self.th1s_perbin[ibin][ss + syst + "Down"].GetBinError(1)**2)**0.5)
- 
-      if options.ManualMC:
+                      if newup.GetBinContent(iOldBin) > 1e-9 or first: 
+                        self.th1s_perbin[ibin][ss + syst + "Up"].SetBinContent(1, self.th1s_perbin[ibin][ss + syst + "Up"].GetBinContent(1) + max(1e-9, factor*newup.GetBinContent(iOldBin)))
+                        self.th1s_perbin[ibin][ss + syst + "Up"].SetBinError(1, (newup.GetBinError(iOldBin)*factor**2 + self.th1s_perbin[ibin][ss + syst + "Up"].GetBinError(1)**2)**0.5)
+                      if newdn.GetBinContent(iOldBin) > 1e-9 or first:
+                        self.th1s_perbin[ibin][ss + syst + "Down"].SetBinContent(1, self.th1s_perbin[ibin][ss + syst + "Down"].GetBinContent(1) + max(1e-9, factor*newdn.GetBinContent(iOldBin)))
+                        self.th1s_perbin[ibin][ss + syst + "Down"].SetBinError(1, (newdn.GetBinError(iOldBin)*factor**2 + self.th1s_perbin[ibin][ss + syst + "Down"].GetBinError(1)**2)**0.5)
+                      first = False
+
+      if options.ManualMC and not(self.skipSigSysts):
         for ibin in range(1, self.nbins + 1):
+          if not self.sigInBins[ibin-1]: continue
           willWrite = False
           toWrite = ""
           signal = self.th1s[s]
@@ -329,7 +369,7 @@ class datacardMaker(object):
             rawMC = (signal.GetBinContent(ibin)/signal.GetBinError(ibin))**2
           toWrite = "ManualMCStats_bin"+ str(ibin) + "_" + str(options.year) + "_" + str(options.region) + "_" + self.channel + " gmN " + str(int(round(rawMC))) + " "
           for j in range(ibin-1):
-            toWrite += '- - '
+            toWrite += '- - ' if self.sigInBins[j] else '- '
           if rawMC == 0 and self.channel in ["B1","B2","SR"]:
             # Now we run the choppy binning search algorithm
             needsgmN = False
@@ -347,10 +387,12 @@ class datacardMaker(object):
                 val = 1438.31 / 75000
               elif options.year == '2016APV':
                 val = 1745.15 / 75000
-              toWrite += str(val) + ' - '
+              elif options.year == 'RunII':
+                val = (5252.99+3639.48+1438.31+1745.15)/(450000)
+              toWrite += str(val*options.scaleS) + ' - '
           elif rawMC != 0:
             willWrite = True
-            toWrite += str(signal.GetBinContent(ibin)/rawMC) + ' - '
+            toWrite += str(signal.GetBinContent(ibin)*options.scaleS/rawMC) + ' - '
           else:
             toWrite += '- - '
           for j in range(self.nbins - ibin):
@@ -360,13 +402,20 @@ class datacardMaker(object):
               newcard.write(toWrite)
       rout = ROOT.TFile(self.output + "/" + options.region + "%s_"%self.channel + self.samples[s]["name"] + "_shapes.root", "RECREATE")
       rout.cd()
+      self.temphistos = {}
       for ibin in range(1, self.nbins+1):
         for h in self.th1s_perbin[ibin]:
           if s in h or "background" in h or "data" in h:
-            self.th1s_perbin[ibin][h].Write()
+            #print("PRE", h, ibin, self.th1s_perbin[ibin][h])
+            if "total_background" in self.th1s_perbin[ibin][h].GetName():
+              self.temphistos[ibin] = self.th1s_perbin[ibin][h].Clone(self.th1s_perbin[ibin][h].GetName().replace("total_background","bkg"))
+              self.temphistos[ibin].Write()
+            else:
+              self.th1s_perbin[ibin][h].Write()
+
       for ibin in range(1, self.nbins+1):
         if not("SR" in self.channel) and not(options.MCABCD):
-          newcard.write("r%s%s_%s rateParam %s %s %1.3f [%1.3f,%1.3f]\n"%(self.options.year,self.options.region, bins[(ibin-1)*2], bins[(ibin-1)*2], "total_background", max(self.yields[ibin]["data_obs"],1), 0.001, max(10.,3*self.yields[ibin]["data_obs"])))
+          newcard.write("r%s%s_%s rateParam %s %s %1.3f [%1.3f,%1.3f]\n"%(self.options.year,self.options.region, "%sbin%i"%(self.channel, ibin), "%sbin%i"%(self.channel, ibin), "bkg", max(self.yields[ibin]["data_obs"],1), max(0.001,self.yields[ibin]["data_obs"] - 10 *self.yields[ibin]["data_obs"]**0.5), max(10.,self.yields[ibin]["data_obs"]+10*self.yields[ibin]["data_obs"]**0.5)))
       rout.Close()
 
 
@@ -395,15 +444,18 @@ class datacardMaker(object):
       #print("....%s"%s, self.systs["yields"]["match"].replace("$PROCESS", self.samples[s]["name"]).replace("[VAR]", options.var).replace("[CHANNEL]",self.channel) if not ("total_background" == s) else "total_background")
       newth1 = self.tf.Get(self.systs["yields"]["match"].replace("$PROCESS", self.samples[s]["name"]).replace("[VAR]", options.var).replace("[CHANNEL]",self.channel) if not ("total_background" == s) else "total_background") 
       if s != "data" or "data_obs" in self.th1s:
-        self.th1s[s] = copy.deepcopy(self.th1s["data_obs"] if s=="data" else newth1.Clone(s))
+        if s == "total_background":
+          self.th1s[s] = copy.deepcopy(newth1.Clone("bkg"))
+        else:
+          self.th1s[s] = copy.deepcopy(self.th1s["data_obs"] if s=="data" else newth1.Clone(s))
       else:
         self.th1s["data_obs"] = copy.deepcopy(newth1.Clone("data_obs"))
 
       self.yields[s] = newth1.Integral()
       if (self.yields[s] == 0 and "SUEP" in s):
-        self.yields[s] = 0.0001*self.th1s[s].GetNbinsX()
+        self.yields[s] = 1e-9*self.th1s[s].GetNbinsX()
         for ibin in range(1, self.th1s[s].GetNbinsX()+1):
-          self.th1s[s].SetBinContent(ibin, 0.0001)
+          self.th1s[s].SetBinContent(ibin, 1e-9)
       if (self.yields[s] <= 0 and not("SUEP" in s)) or s == "data":
         print("Process %s has 0 yields or is data, skipping..."%s)
         if not s=="data": del self.th1s[s]
@@ -438,17 +490,15 @@ class datacardMaker(object):
     self.yields      = {}
     self.nbins = -1
     # First the nominal yields
+    print(self.samples.keys())
     for s in self.samples:
       if not(self.samples[s]["isSig"]) and not(s == "data") and not(options.MCABCD): continue
       if self.samples[s]["name"] == "data" and (self.options.blind or self.options.blind_withS): continue
       if self.options.thispoint:
         if s != self.options.thispoint and not(self.samples[s]["name"] == "data" ): continue
-      if self.channel == 'SR':
-        #print(self.systs["yields"]["match"].replace("$PROCESS", self.samples[s]["name"]).replace("[VAR]", self.options.var).replace("[CHANNEL]", 'SR') if not("total_background" in s) else "total_background")
-        newth1 = self.tf.Get(self.systs["yields"]["match"].replace("$PROCESS", self.samples[s]["name"]).replace("[VAR]", self.options.var).replace("[CHANNEL]", 'SR') if not("total_background" in s) else "total_background")
-      else:
-        #print(self.systs["yields"]["match"].replace("$PROCESS", self.samples[s]["name"]).replace("[VAR]", self.options.var).replace("[CHANNEL]", self.channel) if not("total_background" in s) else "total_background")
-        newth1 = self.tf.Get(self.systs["yields"]["match"].replace("$PROCESS", self.samples[s]["name"]).replace("[VAR]", self.options.var).replace("[CHANNEL]", self.channel) if not("total_background" in s) else "total_background")
+      #print(self.systs["yields"]["match"].replace("$PROCESS", self.samples[s]["name"]).replace("[VAR]", self.options.var).replace("[CHANNEL]", self.channel) if not("total_background" in s) else "total_background")
+      newth1 = None
+      if s != "agnostic": newth1 = self.tf.Get(self.systs["yields"]["match"].replace("$PROCESS", self.samples[s]["name"]).replace("[VAR]", self.options.var).replace("[CHANNEL]", self.channel) if not("total_background" in s) else "total_background")
       if options.integrateBins != -1:
         if newth1.GetNbinsX() > options.integrateBins:
           print("Integrating bins")
@@ -459,9 +509,28 @@ class datacardMaker(object):
               tempth1.SetBinContent(ibin, newth1.GetBinContent(ibin))
               tempth1.SetBinError(ibin, newth1.GetBinError(ibin))
             else:
+              if (tempth1.GetBinContent(ibin)==1e-9) and (newth1.GetBinContent(ibin)==1e-9): continue
               tempth1.SetBinContent(newN, newth1.GetBinContent(ibin)+ tempth1.GetBinContent(newN))
               tempth1.SetBinError(newN, (newth1.GetBinError(ibin)**2 + tempth1.GetBinError(newN)**2)**0.5)
           newth1 = tempth1
+      elif self.doAgnostic:
+        newname = (newth1.GetName() + "_int") if not(s=="agnostic") else self.systs["yields"]["match"].replace("$PROCESS", "agnostic").replace("[VAR]", self.options.var).replace("[CHANNEL]", self.channel)
+        tempth1 = ROOT.TH1F(newname, newname, 1, 0, 1)
+        if s == "agnostic" and self.channel=="SR":
+            tempth1.SetBinContent(1, 1)
+            tempth1.SetBinError(1,0)
+        elif s == "agnostic" and self.channel!="SR":
+            tempth1.SetBinContent(1,0)
+            tempth1.SetBinError(1,0)
+        else:
+            if newth1.GetNbinsX() == 1: # I.e. sidebands E,D,C
+                tempth1.SetBinContent(1,newth1.GetBinContent(1))
+                tempth1.SetBinError(1,newth1.GetBinError(1))
+            else: # I.e. B1, B2, SR
+                for ibin in range(self.agnosticBin, newth1.GetNbinsX()+1): # We integrate the tails
+                    tempth1.SetBinContent(1, tempth1.GetBinContent(1) + newth1.GetBinContent(ibin))
+                    tempth1.SetBinError(1, (tempth1.GetBinError(1)**2 + newth1.GetBinError(ibin)**2)**0.5)
+        newth1 = tempth1
       #print(self.systs["yields"]["match"].replace("$PROCESS", self.samples[s]["name"]).replace("[VAR]", self.options.var).replace("[CHANNEL]", self.channel) if not("total_background" in s) else "total_background")
       self.th1s[s]   = copy.deepcopy(newth1.Clone("data_obs") if s=="data" else newth1.Clone(s))
       self.nbins = self.th1s[s].GetNbinsX()
@@ -474,7 +543,7 @@ class datacardMaker(object):
         else:
           self.backgr.append(s)
     if self.options.ABCD and not options.MCABCD:
-      self.th1s["total_background"] = copy.deepcopy(self.tf.Get("total_background").Clone("total_background"))
+      self.th1s["total_background"] = copy.deepcopy(self.tf.Get("total_background").Clone("bkg"))
       self.backgr.append("total_background")
     if self.options.blind: 
       self.th1s["data_obs"] = copy.deepcopy(self.tf.Get("total_background").Clone("data_obs"))
@@ -499,19 +568,19 @@ class datacardMaker(object):
         if options.MCABCD:
           factor = 1
           if s in self.signals: factor = options.scaleS
-          self.yields[ibin][s]      = self.th1s[s].GetBinContent(ibin)
+          self.yields[ibin][s]      = self.th1s[s].GetBinContent(ibin)*factor
           self.th1s_perbin[ibin][s] = ROOT.TH1F("%s_%sbin%i"%(s, self.channel, ibin), "%s_%sbin%i"%(s, self.channel, ibin), 1, 0 , 1)
-          self.th1s_perbin[ibin][s].SetBinContent(1, max(0.0001,self.yields[ibin][s]*(factor if self.yields[ibin][s] > 0.00011 else 1)))
+          self.th1s_perbin[ibin][s].SetBinContent(1, max(1e-9,self.yields[ibin][s]*(factor if self.yields[ibin][s] > 1e-9 else 1)))
           self.th1s_perbin[ibin][s].SetBinError(1, min(self.yields[ibin][s], max(0.,self.th1s[s].GetBinError(ibin) )))
           #if s in self.backgr:
           #  self.th1s_perbin[ibin][s].SetBinError(1, 0.)
 
         else:
           factor = 1
-          if s in self.signals: factor = options.scaleS
-          self.yields[ibin][s]      = max(0.1 if s in self.backgr else 0.0001, self.th1s[s].GetBinContent(ibin))
+          if s in self.signals: factor = options.scaleS  
+          self.yields[ibin][s]      = max(0.1 if s in self.backgr else 1e-9, self.th1s[s].GetBinContent(ibin)*factor)
           self.th1s_perbin[ibin][s] = ROOT.TH1F("%s_%sbin%i"%(s, self.channel, ibin), "%s_%sbin%i"%(s, self.channel, ibin), 1, 0 , 1)
-          self.th1s_perbin[ibin][s].SetBinContent(1, self.yields[ibin][s]*(factor if self.yields[ibin][s] > 0.00011 else 1) if not s in self.backgr else 1.)
+          self.th1s_perbin[ibin][s].SetBinContent(1, self.yields[ibin][s]*(factor if self.yields[ibin][s] > 1e-9 else 1) if not s in self.backgr else 1.)
           self.th1s_perbin[ibin][s].SetBinError(1, min(self.yields[ibin][s], max(0.,self.th1s[s].GetBinError(1) )))
           if s in self.backgr:
             self.th1s_perbin[ibin][s].SetBinError(1, 0.)
@@ -521,6 +590,7 @@ def combineDatacards(samples, options, output, nbins):
   os.chdir(output)
   for s in samples:
     if not(samples[s]["isSig"]):  continue
+    if samples[s]["isSig"] and options.agnostic >= 0: continue
     if options.thispoint:
       if s != options.thispoint: continue
     names = ["%s=%s%s"%(channel,options.region,channel) + "_" + samples[s]["name"] + ".txt" for channel in ["SR","B1","B2","C1","C2","D1","D2","E1","E2"]]
@@ -529,9 +599,20 @@ def combineDatacards(samples, options, output, nbins):
     newcard = open("Combined" + options.region +"_" + samples[s]["name"] + ".txt",'a')
     if options.MCABCD: continue
     for ibin in range(1, nbins+1):
-      newcard.write("r%s%s_%s rateParam %s %s %s %s\n"%(options.year,options.region, "SRbin%i"%ibin, "SR_SRbin%i"%ibin, "total_background", "(@0*@0*@2*@2*@5*@5*@6*@6)/(@1*@3*@7*@4*@4*@4*@4)", ",".join(["r%s%s_%s"%(options.year,options.region, "%sbin%i"%(chan,ibin if "B" in chan else 1)) for chan in ["B1","B2", "C1","C2", "D1","D2", "E1","E2"]])))
+      newcard.write("r%s%s_%s rateParam %s %s %s %s\n"%(options.year,options.region, "SRbin%i"%ibin, "SR_SRbin%i"%ibin, "bkg", "(@0*@0*@2*@2*@5*@5*@6*@6)/(@1*@3*@7*@4*@4*@4*@4)", ",".join(["r%s%s_%s"%(options.year,options.region, "%sbin%i"%(chan,ibin if "B" in chan else 1)) for chan in ["B1","B2", "C1","C2", "D1","D2", "E1","E2"]])))
     if options.floatB:
-      newcard.write("r%s%s rateParam SR* total_background 1"%(options.region, options.year[2:]))
+      newcard.write("r%s%s rateParam SR* bkg 1"%(options.region, options.year[2:]))
+  if options.agnostic:
+    names = ["%s=%s%s"%(channel,options.region,channel) + "_agnostic.txt" for channel in ["SR","B1","B2","C1","C2","D1","D2","E1","E2"]]
+    os.system("rm %s"%("Combined" + options.region + "_agnostic.txt"))
+    os.system("combineCards.py %s >> %s"%(" ".join(names), "Combined" + options.region + "_agnostic.txt"))
+    newcard = open("Combined" + options.region +"_agnostic.txt",'a')
+    for ibin in range(1, 2):
+      newcard.write("r%s%s_%s rateParam %s %s %s %s\n"%(options.year,options.region, "SR", "SR", "bkg", "(@0*@0*@2*@2*@5*@5*@6*@6)/(@1*@3*@7*@4*@4*@4*@4)", ",".join(["r%s%s_%s"%(options.year,options.region, "%sbin%i"%(chan,ibin if "B" in chan else 1)) for chan in ["B1","B2", "C1","C2", "D1","D2", "E1","E2"]])))
+    if options.floatB:
+      newcard.write("r%s%s rateParam SR* bkg 1\n"%(options.region, options.year[2:]))
+    if options.floatS:
+      newcard.write("rAgnostic%s rateParam * agnostic 1\n"%options.region)
 
 if __name__ == "__main__":
   print("Starting plotting script...")
@@ -544,6 +625,7 @@ if __name__ == "__main__":
   parser.add_option("--var", dest="var", default="", help="Variable name in the plots file used to produce the rootfile")
   parser.add_option("--ABCD", dest="ABCD", default=False, action="store_true", help="Use ABCD background instead of directly MC")
   parser.add_option("--floatB", dest="floatB", default=False, action="store_true", help="Also free float the background")
+  parser.add_option("--floatS", dest="floatS", default=False, action="store_true", help="Also free float the signal (i.e. to add parameters to scale signals up/down for model agnostic results)")
   parser.add_option("--year", dest="year", default="2018", help="Which year the card is from")
   parser.add_option("--region", dest="region", default="SR", help="Which region the card is from")
   parser.add_option("--thispoint", dest="thispoint", default=None, help="Run only this point")
@@ -553,6 +635,10 @@ if __name__ == "__main__":
   parser.add_option("--MCABCD", dest="MCABCD", default=False, action="store_true", help="Save MC predictions for ABCD regions as well")
   parser.add_option("--ManualMCStats", dest="ManualMC", default=False, action="store_true", help="Don't use autoMCStats - Poissonian")
   parser.add_option("--integrateBins", dest="integrateBins", type=int, default=-1, help="From this bin onwards, integrate into a single bin")
+  parser.add_option("--agnostic", dest="agnostic", type=int, default=-1, help="Activate signal agnostic fit. Will integrate yields in the SR from this bin onwards and ignore bins previous to last one.")
+  parser.add_option("--noSigCDE", dest="noSigCDE", default="E2,E1,D2,D1,C2,C1,B2,B1,SR",  help="Include signal in  these sidebands only when doing an ABCD datacard.")
+  parser.add_option("--checkZeroSignal", dest="checkZeroSignal", default=False, action="store_true", help="Don't include signa in card if signal is expected to be 0.")
+  parser.add_option("--onlyRegion", dest="onlyRegion", default="", help="Only run these regions (i.e. for parallelizing the extended ABCD regions in big scans)")
   (options, args) = parser.parse_args()
   samplesFile   = imp.load_source("samples",args[0])
   systsFile     = imp.load_source("systematicsAndShapes", args[1])
@@ -582,9 +668,9 @@ if __name__ == "__main__":
     dM.createDatacards()
   else: # If ABCD, one card per channel
     nToSave = -1
-    for ch in systsFile.systematicsAndShapes["yields"]["extendedABCD"]:
+    for ch in (systsFile.systematicsAndShapes["yields"]["extendedABCD"] if options.onlyRegion == "" else options.onlyRegion.split(",")):
       dM =  datacardMaker(samplesFile.samples, systsFile.systematicsAndShapes, outputFolder, options, channel = ch)
       n = dM.createDatacards()
       del dM
       if ch == "SR": nToSave = n
-    combineDatacards(samplesFile.samples, options, outputFolder, nToSave)
+    if options.onlyRegion == "": combineDatacards(samplesFile.samples, options, outputFolder, nToSave)

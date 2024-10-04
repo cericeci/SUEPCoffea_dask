@@ -49,7 +49,7 @@ class sample(object):
           continue
         else:
           self.variations[var] = self.config["variations"][var]
-    print("VARIATIONS", self.variations)
+      #print("VARIATIONS", self.variations)
       #for var in self.variations:
       #  for orig in self.variations[var]["replaceChannel"]:
       #    if not(orig in self.altChannels):
@@ -147,9 +147,9 @@ class sample(object):
       out = {}
       norm = 0
       for f in self.safefiles:
-        print(f)
+        #print(f)
         run, luminosityBlock, event= f.split("/")[-1].replace("out_","").replace(".hdf5","").split("_")
-        print(run, luminosityBlock, event)
+        #print(run, luminosityBlock, event)
         tt = rf.Get("Runs_"+str(event)+ "_" + str(luminosityBlock) + "_" + str(run))
         out[f] = 0
         for ev in tt:
@@ -193,7 +193,7 @@ class sample(object):
         self.histos[plotName]["total"] = ROOT.TH1F(plotName + "_" + self.name, plotName + "_" + self.name, p["bins"][1], p["bins"][2], p["bins"][3])
       elif p["bins"][0] == "limits":
         self.histos[plotName] = {}
-        self.histos[plotName]["total"] = ROOT.TH1F(plotName + "_" + self.name, plotName + "_" + self.name, p["bins"][2], array.array('f', p["bins"][1])) 
+        self.histos[plotName]["total"] = ROOT.TH1F(plotName + "_" + self.name, plotName + "_" + self.name, p["bins"][1], array.array('f', p["bins"][2])) 
       elif p["bins"][0] == "2Duniform": 
         self.histos[plotName] = {}
         self.histos[plotName]["total"] = ROOT.TH2F(plotName + "_" + self.name, plotName + "_" + self.name, p["bins"][1], p["bins"][2], p["bins"][3], p["bins"][4], p["bins"][5], p["bins"][6])
@@ -213,7 +213,7 @@ class sample(object):
             self.histos[plotName+ "_" + var] = {}
             self.histos[plotName+ "_" + var]["total"] = self.histos[plotName]["total"].Clone(plotName + "_" + self.name +  "_" + var)
 
-    print(self.name, "Pre-load")
+    #print(self.name, "Pre-load")
     if not(options.toLoad):
       for iff, f in enumerate(self.hdfiles):
         if (iff %1 == 0): print("Loading file %i/%i : %s"%(iff, len(self.hdfiles),self.safefiles[iff]))
@@ -248,7 +248,7 @@ class sample(object):
           elif self.noWeights: self.norms[plotName] = 1
           if not(self.dohadd):
             filename = self.safefiles[iff].split("/")[-1].replace("out_","").replace(".hdf5","")
-            print(filename)#, plotName, self.histos[plotName][filename].Integral())
+            #print(filename)#, plotName, self.histos[plotName][filename].Integral())
             self.histos[plotName]["total"].Add(self.histos[plotName][filename])
             del self.histos[plotName][filename]
             if self.doSyst:
@@ -276,7 +276,7 @@ class sample(object):
                 self.histos[plotName+ "_" + var]["total"].Write()
           self.haddedTFile.Close()
         if self.dohadd:
-          print(plotName + "_" + self.name)
+          #print(plotName + "_" + self.name)
           self.histos[plotName]["total"] = self.haddedTFile.Get(plotName + "_" + self.name)
           if self.doSyst:
             for var in self.variations:
@@ -296,7 +296,7 @@ class sample(object):
         #      self.histos[plotName+ "_" + var]["total"].Sumw2()
 
         if not(self.isData) and (self.norms[plotName] > 0): 
-          print(self.name, plotName)
+          #print(self.name, plotName)
           if not(self.noWeights):
             self.histos[plotName]["total"].Scale((options.luminosity if not("partialLumi" in self.config) else self.config["partialLumi"])*self.config["xsec"]/self.norms[plotName])
         if "scale" in self.config:
@@ -314,24 +314,25 @@ class sample(object):
                 self.histos[plotName+ "_" + var + "Dn"]["total"].Scale(self.config["scale"])
             else:
               if not(self.noWeights):
-                print(var, plotName, self.name)
+                #print(var, plotName, self.name)
                 self.histos[plotName+ "_" + var]["total"].Scale((options.luminosity if not("partialLumi" in self.config) else self.config["partialLumi"])*self.config["xsec"]/max(0.0001,self.norms[plotName]))
               if "scale" in self.config:
                 self.histos[plotName+ "_" + var]["total"].Scale(self.config["scale"])
     
   def getHistogramsAndNormsFromROOT(self):
-    print("FROMROOT")
+    #print("FROMROOT")
     inROOT= ROOT.TFile(options.toLoad, "READ")
     for c in self.channels:
       for plotName in self.plotsinchannel[c]:
-        print("1", self.histos)
+        #print("1", self.histos, self.name)
         p = self.plots[plotName]
-        print(self.config["th1"][""])
+        #print(self.config["th1"][""])
         self.histos[plotName]["total"]       = copy.deepcopy(inROOT.Get(self.config["th1"][""]))
         if not("data" in self.name):
+          #print(self.config["th1"]["Up"], self.config["th1"]["Dn"])
           self.histos[plotName+"_Up"]["total"] = copy.deepcopy(inROOT.Get(self.config["th1"]["Up"]))
           self.histos[plotName+"_Dn"]["total"] = copy.deepcopy(inROOT.Get(self.config["th1"]["Dn"]))
-        print("2", self.histos)
+        #print("2", self.histos, self.name)
 
   def getRawHistogramsAndNormsOneFile(self, g):
     f, safefile, options = g[0], g[1], g[2]
@@ -414,6 +415,7 @@ class sample(object):
                     values[var], values2[var], weightsNom[var] = p["value"](f[self.variations[var]["replaceChannel"][c]], weights[var])
                   elif (c in self.variations[var]["replaceChannel"]):
                     values[var], values2[var], weightsNom[var] = [], [], []
+
           else:
             values, weightsNom = {}, {}
             if empty:
@@ -424,19 +426,46 @@ class sample(object):
                     values[var], weightsNom[var] = [], []
             else:
               values[""], weightsNom[""] = p["value"](f[c], weights[""])
-
+              print("Nominal:", p["name"], len(values[""]), len(weightsNom[""]), sum(weightsNom[""]))
               if self.doSyst:
                 for var in self.variations:
-                  if (c in self.variations[var]["replaceChannel"]) and type(f[self.variations[var]["replaceChannel"][c]]) == type(f[c]):
-                    values[var], weightsNom[var] = p["value"](f[self.variations[var]["replaceChannel"][c]], weights[var])
-                  elif (c in self.variations[var]["replaceChannel"]):
-                    values[var], weightsNom[var] = [], []
+                  if not("transposer" in self.variations[var]):
+                    if (c in self.variations[var]["replaceChannel"]) and type(f[self.variations[var]["replaceChannel"][c]]) == type(f[c]):
+                      values[var], weightsNom[var] = p["value"](f[self.variations[var]["replaceChannel"][c]], weights[var])
+                    elif (c in self.variations[var]["replaceChannel"]):
+                      values[var], weightsNom[var] = [], []
+                  elif "transposer" in self.variations[var]:
+                    newX = self.variations[var]["transposer"](f[c]) # Until here no cuts applied
+                    values[var], weightsNom[var] =  p["value"](newX, newX["genweight"]) # Redo the cuts
+                    print("Varied", p["name"], len(values[var]), len(weightsNom[var]), sum(weightsNom[var]))
+                    #itries = 0
+                    #while nPlot < len(weightsNom[var]):
+                    #  if sum(weightsNom[var][nPlot:nPlot+14]) > 1: print(nPlot, list(weightsNom[var][nPlot:nPlot+14]), sum(weightsNom[var][nPlot:nPlot+14]))
+                    #  nPlot += 14
+                    #  itries += 1
+                    # print(itries)
+                    #print(np.shape(values[""]), np.shape(weightsNom[""]), np.shape(values[var]), np.shape(weightsNom[var]))
+                    #print(list(values[var][:28]), list(weightsNom[var][:28]))
+                    #print(list(values[var][28:56]), list(weightsNom[var][28:56]))
+                    #print(list(values[var][56:84]), list(weightsNom[var][56:84]))
+                    #print(sum(weightsNom[var]), sum(weightsNom[""]))
           if "extraWeights" in self.config:
             weightsHere = {}
+            print(extraweights)
             for var in extraweights:
+                if var in weightsNom:
+                  if var in self.variations:
+                    if "transposer" in self.variations[var]:
+                      extraweights[var] = np.ndarray.flatten((np.vstack([extraweights[var] for k in range(len( weightsNom[var])/len(extraweights[var]))])).T) # In principle this line does nothing right now 
+                  if len(extraweights[var]) >= 0 and len(extraweights[var]) != len(weightsNom[var]):
+                    tmpweights = copy.copy(extraweights[var])
+                    for i in range(1, len(weightsNom[var])/len(extraweights[var])):
+                      extraweights[var] = np.concatenate((extraweights[var],tmpweights))
                 if empty:
                   weightsHere[var] = []
                 elif var == "":
+                  weightsHere[var] = weightsNom[var]*extraweights[var]
+                elif "transposer" in self.variations[var]:
                   weightsHere[var] = weightsNom[var]*extraweights[var]
                 elif (var in self.variations) and not(c in self.variations[var]["replaceChannel"]):
                   weightsHere[var] = weightsNom[""]*extraweights[var]
@@ -466,9 +495,9 @@ class sample(object):
             root_numpy.fill_hist(self.histos[p["name"]][filename], values[""], weightsHere[""])
             if self.doSyst:
               for var in self.variations:
-                if not(c in self.variations[var]["replaceChannel"]):
+                if not(c in self.variations[var]["replaceChannel"]) and not("transposer" in self.variations[var]):
                   root_numpy.fill_hist(self.histos[p["name"]+ "_" + var + ("Up" if self.variations[var]["symmetrize"] else "")][filename], values[""], weightsHere[var])
-
+                    
           for altchan in values:
             if altchan == "": continue # Skip nominal
             if "2D" in p["bins"][0]:
@@ -836,6 +865,7 @@ class plotter(object):
             altNameUp = systsFile[syst]["match"].replace("$PROCESS", s.name).replace("$SYSTEMATIC", syst).replace("[VAR]_[CHANNEL]", pname).replace("[VAR]", pname) + systsFile[syst]["up"]
             altNameDn = systsFile[syst]["match"].replace("$PROCESS", s.name).replace("$SYSTEMATIC", syst).replace("[VAR]_[CHANNEL]", pname).replace("[VAR]", pname) + systsFile[syst]["down"]
             tmpUp, tmpDn = None, None
+            #print(altNameUp, altNameDn)
             if any([re.match(pr, s.name) for pr in systsFile[syst]["processes"]]): 
               # Then we need to find alternative histograms, they can be configured through alternative samples (i.e. alternative files) or through variations of a sample, so it is tricky to find
               tmpUp, tmpDn = None, None
@@ -852,7 +882,6 @@ class plotter(object):
                   if s.variations[var]["symmetrize"]:
                     testUp = s.name + "_" + var + "Up"
                     testDn = s.name + "_" + var + "Dn"
-                    #print(testUp, altNameUp, testDn, altNameDn)
                     if testUp == altNameUp or altNameDn == testDn:
                       #print("Pass and save")
                       tmpUp = s.histos[pname+ "_" + var + "Up"]["total"].Clone(altNameUp).Rebin(options.rebin) if options.rebin else s.histos[pname+ "_" + var + "Up"]["total"].Clone(altNameUp)
@@ -879,10 +908,11 @@ class plotter(object):
                 histosToSave[altNameDn] = copy.deepcopy(tmpDn)
             else:
               # In this case just read nominal
+              #print("No variation found, read nominal, %s", s.histos[pname]["total"])
               tmpUp = s.histos[pname]["total"].Clone(altNameUp)
               tmpDn = s.histos[pname]["total"].Clone(altNameDn)
           if not(backUp):
-            #print(s.name, syst, pname)
+            print(s.name, syst, pname)
             backUp = tmpUp.Clone().Clone("total_background_%sUp"%syst)
             backDn = tmpDn.Clone().Clone("total_background_%sUp"%syst)
           else: 
@@ -970,10 +1000,10 @@ class plotter(object):
    #if True:
    try:
     p = self.plots[pname]
-    c = ROOT.TCanvas(pname,pname, 800,1050) if not(options.wide) else ROOT.TCanvas(pname,pname, 1600, 1050)
+    c = ROOT.TCanvas(pname,pname, 800 if not(options.wide) else 1600, 1050 if options.doRatio else 750)
     # Set pads
     p1 = ROOT.TPad("mainpad", "mainpad", 0, 0.30 if options.doRatio else 0.00, 1, 1)
-    p1.SetBottomMargin(0.025)
+    p1.SetBottomMargin(0.025 if options.doRatio else 0.12)
     p1.SetTopMargin(0.14)
     p1.SetLeftMargin(0.12)
     if "margins" in p:
@@ -999,7 +1029,7 @@ class plotter(object):
     if "margins" in p:
       p1.SetLeftMargin(p["margins"][2])
       p1.SetRightMargin(p["margins"][3])
-    p2.Draw()
+    if options.doRatio: p2.Draw()
     p1.cd()
     if debug: print("...Pads set")
     tl = ROOT.TLegend(p1.GetLeftMargin() ,0.55, 1-p1.GetRightMargin(), 1-p1.GetTopMargin())
@@ -1063,19 +1093,19 @@ class plotter(object):
         tf = ROOT.TFile(tfname,"READ")
         th = tf.Get(thname)
         for ibin in range(1, thePlotGroups[plotgroup].GetNbinsX()+1):
-          print(ibin, thePlotGroups[plotgroup].GetBinContent(ibin), th.GetBinContent(th.FindBin(thePlotGroups[plotgroup].GetBinLowEdge(ibin)+0.5*thePlotGroups[plotgroup].GetBinWidth(ibin))))
+          #print(ibin, thePlotGroups[plotgroup].GetBinContent(ibin), th.GetBinContent(th.FindBin(thePlotGroups[plotgroup].GetBinLowEdge(ibin)+0.5*thePlotGroups[plotgroup].GetBinWidth(ibin))))
           thePlotGroups[plotgroup].SetBinContent(ibin, thePlotGroups[plotgroup].GetBinContent(ibin)*th.GetBinContent(th.FindBin(thePlotGroups[plotgroup].GetBinLowEdge(ibin)+0.5*thePlotGroups[plotgroup].GetBinWidth(ibin))))
       theStack.Add(thePlotGroups[plotgroup])
       tl.AddEntry(thePlotGroups[plotgroup], plotgroup, "f")
       stacksize += thePlotGroups[plotgroup].Integral()
     for plotgroup in thePlotGroupsSignal:
       if options.scaleStoB:
-        print(plotgroup, "scaling", back.Integral()/max(0.00001,thePlotGroupsSignal[plotgroup].Integral()))
+        #print(plotgroup, "scaling", back.Integral()/max(0.00001,thePlotGroupsSignal[plotgroup].Integral()))
         thePlotGroupsSignal[plotgroup].Scale(back.Integral()/max(0.00001,thePlotGroupsSignal[plotgroup].Integral()))
       if options.scaleS:
-        print(thePlotGroupsSignal[plotgroup].Integral())
+        #print(thePlotGroupsSignal[plotgroup].Integral())
         thePlotGroupsSignal[plotgroup].Scale(options.scaleS)
-        print(thePlotGroupsSignal[plotgroup].Integral())
+        #print(thePlotGroupsSignal[plotgroup].Integral())
       if options.scaleSYields > 0:
         if options.debug: print(plotgroup)
         thePlotGroupsSignal[plotgroup].Scale(options.scaleSYields/thePlotGroupsSignal[plotgroup].Integral())
@@ -1098,13 +1128,13 @@ class plotter(object):
         tf = ROOT.TFile(tfname,"READ")
         th = tf.Get(thname)
         for ibin in range(1, back.GetNbinsX()+1):
-          print(ibin, back.GetBinContent(ibin), th.GetBinContent(th.FindBin(back.GetBinLowEdge(ibin)+0.5*back.GetBinWidth(ibin))))
+          #print(ibin, back.GetBinContent(ibin), th.GetBinContent(th.FindBin(back.GetBinLowEdge(ibin)+0.5*back.GetBinWidth(ibin))))
           back.SetBinContent(ibin, back.GetBinContent(ibin)*th.GetBinContent(th.FindBin(back.GetBinLowEdge(ibin)+0.5*back.GetBinWidth(ibin))))
 
     backSyst = back
     if self.doSyst:
       backSyst, histosToSave = self.doSystVariations(options.systFile, pname, options, back)
-      
+      if options.noSMUnc: backSyst = back 
     if p["normalize"]:
       for index in range(len(theIndivs)):
         theIndivs[index].Scale(1./max(0.000001,theIndivs[index].Integral()))
@@ -1126,7 +1156,17 @@ class plotter(object):
     theStack.GetYaxis().SetTitleOffset(0.72)
 
     theStack.GetYaxis().SetTitle("Normalized events" if p["normalize"] else "Events")
-    theStack.GetXaxis().SetTitle("") # Empty, as it goes into the ratio plot
+    theStack.GetXaxis().SetTitle("" if options.doRatio else p["xlabel"]) # Empty, as it goes into the ratio plot
+    if "xbinlabels" in p and not(options.doRatio):
+      theStack.GetXaxis().LabelsOption("v")
+      theStack.GetXaxis().SetTitleOffset(1.75)
+      for i in range(1,theStack.GetXaxis().GetNbins()+1):
+        theStack.GetXaxis().SetBinLabel(i, p["xbinlabels"][i-1])
+        theStack.GetXaxis().SetLabelSize(0.12)
+        if "xbinlabelsize" in p:
+          theStack.GetXaxis().SetLabelSize(p["xbinlabelsize"])
+        theStack.GetXaxis().SetLabelOffset(0.02)
+
     if "maxY" in p: 
       theStack.SetMaximum(p["maxY"]*options.scaleMax)
     if "minY" in p:
@@ -1137,8 +1177,8 @@ class plotter(object):
       backSyst.SetFillColor(ROOT.kBlack)
       backSyst.SetLineColor(ROOT.kBlack)
       backSyst.SetFillStyle(3244)
-      tl.AddEntry(backSyst, "SM Unc.", "f")
-      backSyst.Draw("E2same")
+      if not options.noSMUnc: tl.AddEntry(backSyst, "SM Unc.", "f")
+      if not options.noSMUnc: backSyst.Draw("E2same")
     for ind in theIndivs:
       ind.Draw("hist same")
     # Last, draw the data
@@ -1171,15 +1211,32 @@ class plotter(object):
       p2.cd()
 
       # By default S/B, data/MC, TODO: add more options
-      den  = backSyst.Clone("backsyst_ratio")
+      if not options.den:
+        den  = backSyst.Clone("backsyst_ratio")
+      else:
+        for ind in theIndivs + theData + [thePlotGroups[k] for k in thePlotGroups]:
+          #print(ind.GetName())
+          if ind.GetName() in options.den:
+             den = ind.Clone("backsyst_ratio")
       denForDivide = den.Clone("forDivide")
       nums = []
-      for ind in  theIndivs + theData:
-        try:
-          nums.append(ind.Clone(ind.GetName()+ "_ratio"))
-        except:
-          if options.debug: raise
-          print("Something went wrong in the ratio...")
+      if not options.nums:
+        for ind in  theIndivs + theData:
+          try:
+            nums.append(ind.Clone(ind.GetName()+ "_ratio"))
+          except:
+            if options.debug: raise
+            print("Something went wrong in the ratio...")
+      else:
+        if "back" in options.nums:
+          nums.append(backSyst.Clone("backratio"))
+          nums[-1].SetFillStyle(0)
+          nums[-1].SetLineWidth(3)
+        for ind in theIndivs + theData +  [thePlotGroups[k] for k in thePlotGroups]:
+          #print(ind.GetName())
+          if ind.GetName() in options.nums:
+            nums.append(ind.Clone(ind.GetName() + "_ratio"))
+      #print(den, nums)
       #nums = [ind.Clone(ind.GetName()+ "_ratio") for ind in  theIndivs + theData]
       for ib in range(0, den.GetNbinsX()+1):
         denForDivide.SetBinError(ib,0)
@@ -1200,9 +1257,11 @@ class plotter(object):
         den.LabelsOption("v")
         den.GetXaxis().SetTitleOffset(1.75)
         for i in range(1,den.GetNbinsX()+1):
-          print(i, p["xbinlabels"][i-1])
+          #print(i, p["xbinlabels"][i-1])
           den.GetXaxis().SetBinLabel(i, p["xbinlabels"][i-1])
           den.GetXaxis().SetLabelSize(0.12)
+          if "xbinlabelsize" in p:
+            den.GetXaxis().SetLabelSize(p["xbinlabelsize"])
           den.GetXaxis().SetLabelOffset(0.02)
           #den.GetXaxis().ChangeLabel(i, -1,-1,-1,-1,-1,p["xbinlabels"][i-1])
       den.LabelsOption("v")
@@ -1214,14 +1273,14 @@ class plotter(object):
       denbar = den.Clone(den.GetName() + "_bar")
       denbar.SetFillColor(ROOT.kCyan if self.doSyst else ROOT.kGray)
       denbar.SetFillStyle(1001)
-      denbar.Draw("E2")
+      if not options.noSMUnc: denbar.Draw("E2")
       if self.doSyst:
         backratio = back.Clone("backratiostat")
         backratio.Divide(back)
         backratio.SetFillColor(ROOT.kGray)
         backratio.SetLineColor(ROOT.kGray)
         backratio.SetFillStyle(1001)
-        backratio.Draw("E2 same")
+        if not options.noSMUnc: backratio.Draw("E2 same")
       ncolumns = 3 if self.doSyst else 2 
       tlr = ROOT.TLegend(0.9-0.2*ncolumns,0.89,0.9,0.97)
       tlr.SetNColumns(ncolumns)
@@ -1229,7 +1288,7 @@ class plotter(object):
       if "legendRatioPosition" in p:
         tlr = ROOT.TLegend(p["legendRatioPosition"][0], p["legendRatioPosition"][1], p["legendRatioPosition"][2], p["legendRatioPosition"][3])
       if not options.fromROOT: tlr.AddEntry(denbar, "SM syst.+stat. Unc." if self.doSyst else options.ratiostatlabel, "f")
-      if self.doSyst:
+      if self.doSyst and not(options.nums):
         tlr.AddEntry(backratio, options.ratiostatlabel, "f")
       for ib in range(0, den.GetNbinsX()+1):
         den.SetBinError(ib,0)
@@ -1251,7 +1310,10 @@ class plotter(object):
         if "Data" in num.GetName(): 
           tlr.AddEntry(num, "Data", "pl")
         elif options.AddBOnRatio:
-          tlr.AddEntry(num, "S+B", "pl") 
+          tlr.AddEntry(num, "S+B", "pl")
+        elif options.numlabels:
+          numlabels = eval(options.numlabels)
+          tlr.AddEntry(num, numlabels[num.GetName()], "l") 
       if debug: print("...Ratio done")
       if "rlines" in p:
         rtlines = []
@@ -1303,7 +1365,7 @@ class plotter(object):
     back.Write()
     if self.doSyst:
       for h in histosToSave:
-        print("histosToSave ---------------------------->", h)
+        #print("histosToSave ---------------------------->", h)
         histosToSave[h].Write()
     tf.Close()
     if debug: print("...File closed")
@@ -1329,7 +1391,7 @@ if __name__ == "__main__":
   parser.add_option("--files", dest="files", default=None, help="If not none, process only these set of comma separated files")
   parser.add_option("--queue", dest="queue", default=None, help="If not none, submit jobs to this queue")
   parser.add_option("--batchsize", dest="batchsize", default=1, help="Run this many files per batch job")
-  parser.add_option("--jobname", dest="jobname", default="batchjobs", help="Folder in which to create the executable jobs")
+  parser.add_option("--jobname", dest="jobname", default=False, help="Folder in which to create the executable jobs")
   parser.add_option("--resubmit", dest="resubmit", default=False, action="store_true", help="If true, only run jobs that failed before (missing root files)")
   parser.add_option("--rebin", dest="rebin", default=None, type="int", help="Collapse bins by this factor")
   parser.add_option("--ratioylabel", dest="ratioylabel", type="string", default="X/SM", help="Title of the Y axis of the ratio plot")
@@ -1345,6 +1407,7 @@ if __name__ == "__main__":
 
   parser.add_option("--weight-histo", dest="weightHisto", type="string", default=None, help="File:histogram, reweight the output background histograms base on target histogram")
   parser.add_option("--noratiostat", dest="noratiostat", action="store_true", default=False, help="Do not show stat uncertainties in ratios (i.e. if num/dem are fully correlated this would mean double counting")
+  parser.add_option("--noSMUnc", dest="noSMUnc", action="store_true", default=False, help="Do not show SM bkg. stat")
   parser.add_option("--systFile", dest="systFile", type="string", default=None, help="Systematics configuration file")
   parser.add_option("--pretend", dest="pretend", action="store_true", default=False, help="Activate pretend mode (create submit job files but don't submit)")
   parser.add_option("--onlytotal", dest="onlytotal", action="store_true", default=False, help="For colz plots, only plot total background")
@@ -1359,8 +1422,15 @@ if __name__ == "__main__":
   parser.add_option("--plotAll", dest="plotAll", default = False, action="store_true", help="If activated, plot even those that are to be skipped")
   parser.add_option("--doRatio", dest="doRatio", default = True, help="If activated, do the ratio (default is active)")
   parser.add_option("--smartSplitting", dest="smartSplitting", default=False, action="store_true", help="If activivated jobs are allowed to mix samples and --batchsize just denotes the max disk space of processed samples (as proxy of needed memory)")
+  parser.add_option("--nums", dest="nums", default = None, help="Numerators for ratio")
+  parser.add_option("--den", dest="den", default = None, help="Denominator for ratio")
+  parser.add_option("--numlabels", dest="numlabels", default = None, help="Labels for nums in ratio")
   
   (options, args) = parser.parse_args()
+  if options.nums:
+    options.nums = options.nums.split(",")
+    print(options.nums)
+  if not(options.jobname): options.jobname = options.toSave
   options.doRatio = int(options.doRatio) > 0
   samplesFile = imp.load_source("samples",args[0])
   plotsFile   = imp.load_source("plots",  args[1])
