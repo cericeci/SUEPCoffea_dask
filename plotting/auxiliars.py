@@ -2,6 +2,7 @@ import ROOT
 import numpy as np
 import os
 
+"""
 ##### SF files #####
 
 muIDfile = {}
@@ -189,8 +190,89 @@ maxZy   = ZptHist.GetNbinsY()
 def correctZpt(x):
   sf = ZptHist.GetBinContent(min(max(1, ZptHist.GetXaxis().FindBin(x["Z_pt"])), maxZx), min(max(1, ZptHist.GetYaxis().FindBin(x["Z_eta"])), maxZy))
   return sf
-
+"""
 #### Identity ####
 
 def one(x):
   return np.ones(len(x))
+
+#### Zpt #### 
+def th1fToNumpy(h):
+  out = []
+  bins = []
+  for ibin in range(1, h.GetNbinsX()+2):
+    out.append(h.GetBinContent(ibin))
+    bins.append(h.GetBinLowEdge(ibin))
+  return np.array(out), bins
+
+def th2fToNumpy(f, hname):
+  tf = ROOT.TFile(f, "READ")
+  h = tf.Get(hname)
+  out = []
+  binsX = []
+  binsY = []
+  for ibin in range(0, h.GetNbinsX()+2):
+    theArr = []
+    for jbin in range(0, h.GetNbinsY()+2):
+      theArr.append(h.GetBinContent(ibin, jbin))
+      if ibin == 0: binsY.append(h.GetYaxis().GetBinLowEdge(jbin))
+    out.append(np.array(theArr))
+    binsX.append(h.GetXaxis().GetBinLowEdge(ibin))
+  return np.array(out), np.array(binsX), np.array(binsY)
+    
+tf = ROOT.TFile("../data/Zpt/Zpt_corrections.root","READ")
+hP = tf.Get("hP")
+hM = tf.Get("hM")
+
+def correct(dataframe, histogram, variable):
+  vals, cuts = th1fToNumpy(histogram)
+  theBin = "0 "
+  for v in cuts[1:-1]:
+    theBin += "+ ( dataframe[\"%s\"] > %1.1f)"%(variable, v)
+  k = eval(theBin)
+  SF = vals[k]
+  return SF
+
+import pandas as pd
+import copy
+
+def transposeTracks(x, year, theVar):
+  weights = x["genweight"]
+  if year == "UL18":
+    out, val1, val2 = th2fToNumpy("/eos/user/c/cericeci/www/SUEP/UL18/ResponsesTracks/Tracks_inclusive.root", "Tracks_inclusive")
+  elif year == "UL17":
+    out, val1, val2 = th2fToNumpy("/eos/user/c/cericeci/www/SUEP/UL17/ResponsesTracks/Tracks_inclusive.root", "Tracks_inclusive")
+  elif year == "UL16":
+    out, val1, val2 = th2fToNumpy("/eos/user/c/cericeci/www/SUEP/UL16/ResponsesTracks/Tracks_inclusive.root", "Tracks_inclusive")
+  elif year == "UL16APV":
+    out, val1, val2 = th2fToNumpy("/eos/user/c/cericeci/www/SUEP/UL16APV/ResponsesTracks/Tracks_inclusive.root", "Tracks_inclusive")
+  else:
+    raise("Incorrect year provided to transposeTracks")
+
+  theBin = "0 "
+  for v in val1[1:-1]:
+    theBin += "+ ( x[\"%s\"] > %1.1f)"%(theVar, v)
+  k = eval(theBin)
+  allWeights = out[k]*(np.vstack([weights for k in range(len(val2))]).T) # out[k] is an array of probabilities per event
+  a, b = np.vstack([np.array(val2) for k in range(len(x))]), allWeights
+  a, b = a.T, b.T
+  #print(a, b)
+  newPD = copy.deepcopy(x)
+  newPD[theVar] = a[0][:]
+  newPD["genweight"] = b[0][:]
+  anotherPD = []
+  for i in range(1, len(b.T[0])):
+    anotherPD.append(copy.deepcopy(x))
+    anotherPD[-1][theVar] = a[i][:]
+    anotherPD[-1]["genweight"] = b[i][:]
+    newPD = pd.concat([newPD,anotherPD[-1]])
+  #print(list(newPD[theVar]), list(newPD["genweight"]))
+  return newPD
+
+correctZpTToPowheg = lambda x: correct(x, hP, "genZpt")
+correctZpTToMINNLO = lambda x: correct(x, hM, "genZpt")
+
+#import pandas as pd
+#a = pd.HDFStore("/afs/cern.ch/user/c/cericeci/out_222004_223_1.hdf5","r")
+#transposeTracks(a["SR"], "UL18", "leadcluster_ntracks")
+

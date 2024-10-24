@@ -426,7 +426,7 @@ class sample(object):
                     values[var], weightsNom[var] = [], []
             else:
               values[""], weightsNom[""] = p["value"](f[c], weights[""])
-              print("Nominal:", p["name"], len(values[""]), len(weightsNom[""]), sum(weightsNom[""]))
+              #print("Nominal:", p["name"], len(values[""]), len(weightsNom[""]), sum(weightsNom[""]))
               if self.doSyst:
                 for var in self.variations:
                   if not("transposer" in self.variations[var]):
@@ -437,7 +437,7 @@ class sample(object):
                   elif "transposer" in self.variations[var]:
                     newX = self.variations[var]["transposer"](f[c]) # Until here no cuts applied
                     values[var], weightsNom[var] =  p["value"](newX, newX["genweight"]) # Redo the cuts
-                    print("Varied", p["name"], len(values[var]), len(weightsNom[var]), sum(weightsNom[var]))
+                    #print("Varied", p["name"], len(values[var]), len(weightsNom[var]), sum(weightsNom[var]))
                     #itries = 0
                     #while nPlot < len(weightsNom[var]):
                     #  if sum(weightsNom[var][nPlot:nPlot+14]) > 1: print(nPlot, list(weightsNom[var][nPlot:nPlot+14]), sum(weightsNom[var][nPlot:nPlot+14]))
@@ -451,7 +451,7 @@ class sample(object):
                     #print(sum(weightsNom[var]), sum(weightsNom[""]))
           if "extraWeights" in self.config:
             weightsHere = {}
-            print(extraweights)
+            #print(extraweights)
             for var in extraweights:
                 if var in weightsNom:
                   if var in self.variations:
@@ -912,7 +912,7 @@ class plotter(object):
               tmpUp = s.histos[pname]["total"].Clone(altNameUp)
               tmpDn = s.histos[pname]["total"].Clone(altNameDn)
           if not(backUp):
-            print(s.name, syst, pname)
+            #print(s.name, syst, pname)
             backUp = tmpUp.Clone().Clone("total_background_%sUp"%syst)
             backDn = tmpDn.Clone().Clone("total_background_%sUp"%syst)
           else: 
@@ -1429,7 +1429,7 @@ if __name__ == "__main__":
   (options, args) = parser.parse_args()
   if options.nums:
     options.nums = options.nums.split(",")
-    print(options.nums)
+    #print(options.nums)
   if not(options.jobname): options.jobname = options.toSave
   options.doRatio = int(options.doRatio) > 0
   samplesFile = imp.load_source("samples",args[0])
@@ -1510,7 +1510,7 @@ if __name__ == "__main__":
 
   thePlotter = plotter(plots, samples, options)
   if options.queue:
-    print(options.jobname, os.path.isdir(options.jobname))
+    #print(options.jobname, os.path.isdir(options.jobname))
     if not(os.path.isdir(options.jobname)):
       print("mkdir %s"%options.jobname) 
       os.system("mkdir %s"%options.jobname)
