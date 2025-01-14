@@ -141,7 +141,7 @@ class datacardMaker(object):
               self.th1s[pr + syst + "Up"] = copy.deepcopy(newup.Clone(pr + name + "Up"))
               self.th1s[pr + syst + "Down"] = copy.deepcopy(newdn.Clone(pr + name + "Down"))
               #if (self.th1s[pr + syst + "Up"].Integral() < 1e-9) or (self.th1s[pr + syst + "Down"].Integral() < 1e-9):
-              for ibin in range(1, self.th1s[pr + syst + "Down"].GetNbinsX()+1):
+              for ibin in range(1, self.th1s[pr + syst + "Down"].GetNbinsX()+2):
                   if self.th1s[pr + syst + "Down"].GetBinContent(ibin) < 1e-9:  self.th1s[pr + syst + "Down"].SetBinContent(ibin,1e-9)
                   if self.th1s[pr + syst + "Up"].GetBinContent(ibin) < 1e-9:  self.th1s[pr + syst + "Up"].SetBinContent(ibin,1e-9)
 
@@ -300,6 +300,9 @@ class datacardMaker(object):
                   bininch = int(bininch.replace("bin",""))
                   if not(ch in what): what[ch] = [bininch]
                   else: what[ch].append(bininch)
+                  if bininch == self.nbins and options.integrateBins == -1:
+                      what[ch].append(bininch+1) # Add overflow!
+
                 if not(whatWithBins): raise("Flatten uncertainty %s undefined for channel %s"%(syst, self.channel))
                 #print("For systematic %s on channel %s will combine information from:"%(syst, self.channel), what)
                 nomVarFlat = 0
@@ -318,8 +321,8 @@ class datacardMaker(object):
                     dnflatH.SetDirectory(0)
                     tfFlat.Close()
                     self.tf.cd()
-                    for ibinFlat in range(1, nomFlatH.GetNbinsX()+1):
-                        if not(ibinFlat in what[w]) or (ibinFlat >= (self.nbins+1) and options.integrateBins > 0): continue
+                    for ibinFlat in range(1, nomFlatH.GetNbinsX()+2):
+                        if not(ibinFlat in what[w]) or (ibinFlat >= (self.nbins+1) and options.integrateBins > 0): continue # Don't add extra bins when flattening
                         nomVarFlat += nomFlatH.GetBinContent(ibinFlat)
                         nomVarUp += upflatH.GetBinContent(ibinFlat)
                         nomVarDn += dnflatH.GetBinContent(ibinFlat)
@@ -344,11 +347,14 @@ class datacardMaker(object):
                   self.th1s_perbin[ibin][ss + syst + "Down"] = ROOT.TH1F("%s_%sbin%i_%sDown"%(ss, self.channel, ibin, name), "%s_%sbin%i_%sDown"%(ss, self.channel, ibin, name), 1, 0 , 1)
                   self.th1s_perbin[ibin][ss + syst + "Down"].SetBinContent(1, max(1e-9, factor*newdn.GetBinContent(ibin) if self.systs[syst]["down"] != "" else self.th1s_perbin[ibin][ss].GetBinContent(1)))
                   self.th1s_perbin[ibin][ss + syst + "Down"].SetBinError(1, factor*newdn.GetBinError(ibin) if self.systs[syst]["down"] != "" else self.th1s_perbin[ibin][ss].GetBinError(1))
-                elif (options.integrateBins > 0) or (ibin == options.integrateBins):
+                  if ibin == self.nbins and options.integrateBins == -1:
+                      self.th1s_perbin[ibin][ss + syst + "Up"].SetBinContent(1, max(1e-9, factor*newup.GetBinContent(ibin)+ factor*newup.GetBinContent(ibin+1)))
+                      self.th1s_perbin[ibin][ss + syst + "Down"].SetBinContent(1, max(1e-9, factor*newdn.GetBinContent(ibin)+factor*newdn.GetBinContent(ibin+1) if self.systs[syst]["down"] != "" else self.th1s_perbin[ibin][ss].GetBinContent(1)))
+                elif (options.integrateBins > 0) and (ibin == options.integrateBins):
                   self.th1s_perbin[ibin][ss + syst + "Up"] = ROOT.TH1F("%s_%sbin%i_%sUp"%(ss, self.channel, ibin, name), "%s_%sbin%i_%sUp"%(ss, self.channel, ibin, name), 1, 0 , 1)
                   self.th1s_perbin[ibin][ss + syst + "Down"] = ROOT.TH1F("%s_%sbin%i_%sDown"%(ss, self.channel, ibin, name), "%s_%sbin%i_%sDown"%(ss, self.channel, ibin, name), 1, 0 , 1)
                   first = True
-                  for iOldBin in range(options.integrateBins, newdn.GetNbinsX()+1):
+                  for iOldBin in range(options.integrateBins, newdn.GetNbinsX()+2):
                       if newup.GetBinContent(iOldBin) > 1e-9 or first: 
                         self.th1s_perbin[ibin][ss + syst + "Up"].SetBinContent(1, self.th1s_perbin[ibin][ss + syst + "Up"].GetBinContent(1) + max(1e-9, factor*newup.GetBinContent(iOldBin)))
                         self.th1s_perbin[ibin][ss + syst + "Up"].SetBinError(1, (newup.GetBinError(iOldBin)*factor**2 + self.th1s_perbin[ibin][ss + syst + "Up"].GetBinError(1)**2)**0.5)
@@ -366,7 +372,10 @@ class datacardMaker(object):
           if signal.GetBinError(ibin) == 0:
             rawMC = 0
           else:
-            rawMC = (signal.GetBinContent(ibin)/signal.GetBinError(ibin))**2
+            if ibin == self.nbins and options.integrateBins == -1:
+              rawMC = (signal.GetBinContent(ibin)+signal.GetBinContent(ibin+1))/(signal.GetBinError(ibin)**2 + signal.GetBinError(ibin+1)**2)
+            else:
+              rawMC = (signal.GetBinContent(ibin)/signal.GetBinError(ibin))**2
           toWrite = "ManualMCStats_bin"+ str(ibin) + "_" + str(options.year) + "_" + str(options.region) + "_" + self.channel + " gmN " + str(int(round(rawMC))) + " "
           for j in range(ibin-1):
             toWrite += '- - ' if self.sigInBins[j] else '- '
@@ -392,7 +401,10 @@ class datacardMaker(object):
               toWrite += str(val*options.scaleS) + ' - '
           elif rawMC != 0:
             willWrite = True
-            toWrite += str(signal.GetBinContent(ibin)*options.scaleS/rawMC) + ' - '
+            if ibin ==self.nbins and options.integrateBins == -1:
+              toWrite += str((signal.GetBinContent(ibin) + signal.GetBinContent(ibin+1))*options.scaleS/rawMC) + ' - '
+            else:
+              toWrite += str(signal.GetBinContent(ibin)*options.scaleS/rawMC) + ' - '
           else:
             toWrite += '- - '
           for j in range(self.nbins - ibin):
@@ -504,7 +516,7 @@ class datacardMaker(object):
           print("Integrating bins")
           newN = options.integrateBins
           tempth1 = ROOT.TH1F(newth1.GetName() + "_int", newth1.GetName() + "_int", newN, 0, newN)
-          for ibin in range(1,newth1.GetNbinsX()+1):
+          for ibin in range(1,newth1.GetNbinsX()+2):
             if ibin < options.integrateBins:
               tempth1.SetBinContent(ibin, newth1.GetBinContent(ibin))
               tempth1.SetBinError(ibin, newth1.GetBinError(ibin))
@@ -527,7 +539,7 @@ class datacardMaker(object):
                 tempth1.SetBinContent(1,newth1.GetBinContent(1))
                 tempth1.SetBinError(1,newth1.GetBinError(1))
             else: # I.e. B1, B2, SR
-                for ibin in range(self.agnosticBin, newth1.GetNbinsX()+1): # We integrate the tails
+                for ibin in range(self.agnosticBin, newth1.GetNbinsX()+2): # We integrate the tails
                     tempth1.SetBinContent(1, tempth1.GetBinContent(1) + newth1.GetBinContent(ibin))
                     tempth1.SetBinError(1, (tempth1.GetBinError(1)**2 + newth1.GetBinError(ibin)**2)**0.5)
         newth1 = tempth1
@@ -578,12 +590,17 @@ class datacardMaker(object):
         else:
           factor = 1
           if s in self.signals: factor = options.scaleS  
-          self.yields[ibin][s]      = max(0.1 if s in self.backgr else 1e-9, self.th1s[s].GetBinContent(ibin)*factor)
+          if (ibin == self.nbins) and (options.integrateBins == -1): # Remember to add overflow!
+              self.yields[ibin][s] = max(0.1 if s in self.backgr else 1e-9,  self.th1s[s].GetBinContent(ibin)*factor+  self.th1s[s].GetBinContent(ibin+1)*factor)
+          else:
+              self.yields[ibin][s]      = max(0.1 if s in self.backgr else 1e-9, self.th1s[s].GetBinContent(ibin)*factor)
+              
           self.th1s_perbin[ibin][s] = ROOT.TH1F("%s_%sbin%i"%(s, self.channel, ibin), "%s_%sbin%i"%(s, self.channel, ibin), 1, 0 , 1)
           self.th1s_perbin[ibin][s].SetBinContent(1, self.yields[ibin][s]*(factor if self.yields[ibin][s] > 1e-9 else 1) if not s in self.backgr else 1.)
           self.th1s_perbin[ibin][s].SetBinError(1, min(self.yields[ibin][s], max(0.,self.th1s[s].GetBinError(1) )))
           if s in self.backgr:
             self.th1s_perbin[ibin][s].SetBinError(1, 0.)
+
 
 def combineDatacards(samples, options, output, nbins):
   # Get all ABCD cards, combine them and add the ABCD stuff
