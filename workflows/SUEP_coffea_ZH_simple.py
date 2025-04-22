@@ -20,6 +20,7 @@ import correctionlib
 from workflows.CMS_corrections.jetmet_utils import apply_jecs
 import copy
 import json
+from workflows.CMS_corrections.pdf_utils import get_pdf_alphaS_variations
 
 vector.register_awkward()
 
@@ -37,6 +38,7 @@ class SUEP_cluster(processor.ProcessorABC):
         self.isSignal = "ZH" in sample
         print("SAMPLE:", sample)
         print("IS SIGNAL:", self.isSignal)
+        print("IS MC:", self.isMC)
         self.syst_var, self.syst_suffix = (syst_var, f'_sys_{syst_var}') if do_syst and syst_var else ('', '')
         self.weight_syst = weight_syst
         self.prefixes = {"SUEP": "SUEP"}
@@ -110,6 +112,7 @@ class SUEP_cluster(processor.ProcessorABC):
 
     def h5store(self, store: pd.HDFStore, df: pd.DataFrame, fname: str, gname: str, **kwargs: float) -> None:
         store.put(gname, df)
+        print("\n\n\n METADATA", kwargs, type(kwargs), "\n\n\n")
         store.get_storer(gname).attrs.metadata = kwargs
         
     def save_dfs(self, dfs, df_names, fname=None):
@@ -120,7 +123,10 @@ class SUEP_cluster(processor.ProcessorABC):
             # pandas to hdf5
             for out, gname in zip(dfs, df_names):
                 if self.isMC:
-                    metadata = dict(gensumweight=self.gensumweight,era=self.era, mc=self.isMC,sample=self.sample)
+                    if self.isSignal:
+                        metadata = dict(gensumweight=self.gensumweight, gensumpdfweights=[k for k in self.gensumpdfweights], era=self.era, mc=self.isMC,sample=self.sample)
+                    else:
+                        metadata = dict(gensumweight=self.gensumweight,era=self.era, mc=self.isMC,sample=self.sample)
                     #metadata.update({"gensumweight":self.gensumweight})
                 else:
                     metadata = dict(era=self.era, mc=self.isMC,sample=self.sample)    
@@ -191,13 +197,13 @@ class SUEP_cluster(processor.ProcessorABC):
         pathlib.Path(local_file).unlink()
 
 
-    def selectByFilters(self, events):
+    def selectByFilters(self, events, extraColls = []):
         ### Apply MET filter selection (see https://twiki.cern.ch/twiki/bin/viewauth/CMS/MissingETOptionalFiltersRun2)
         if self.era == 2018 or self.era == 2017:
            cutAnyFilter = (events.Flag.goodVertices) & (events.Flag.globalSuperTightHalo2016Filter) & (events.Flag.HBHENoiseFilter) & (events.Flag.HBHENoiseIsoFilter) & (events.Flag.EcalDeadCellTriggerPrimitiveFilter) & (events.Flag.BadPFMuonFilter) & (events.Flag.BadPFMuonDzFilter) & (events.Flag.eeBadScFilter) & (events.Flag.ecalBadCalibFilter)
         if self.era == 2016 or self.era == 2015: # 2015==2016APV
            cutAnyFilter = (events.Flag.goodVertices) & (events.Flag.globalSuperTightHalo2016Filter) & (events.Flag.HBHENoiseFilter) & (events.Flag.HBHENoiseIsoFilter) & (events.Flag.EcalDeadCellTriggerPrimitiveFilter) & (events.Flag.BadPFMuonFilter) & (events.Flag.BadPFMuonDzFilter) & (events.Flag.eeBadScFilter)
-        return events[cutAnyFilter]
+        return events[cutAnyFilter], [coll[cutAnyFilter] for coll in extraColls]
 
 
     def selectByTrigger(self, events, extraColls = []):
@@ -294,10 +300,12 @@ class SUEP_cluster(processor.ProcessorABC):
             templeps = ak.concatenate([selMuons,selElectrons], axis=1)
             cutHasOFLeps =  (ak.num(templeps, axis=1)==2) & (ak.max(templeps.pt, axis=1, mask_identity=False) >= 25) & (ak.sum(templeps.charge,axis=1) == 0) 
             events = events[cutHasOFLeps]
+            eColls = [coll[cutHasOFLeps] for coll in extraColls]
             selElectrons = selElectrons[cutHasOFLeps]
             selMuons = selMuons[cutHasOFLeps]
             cutOneAndOne = (ak.num(selElectrons) == 1) & (ak.num(selMuons) == 1)
             events = events[cutOneAndOne]
+            eColls = [coll[cutOneAndOne] for coll in eColls]
             selElectrons = selElectrons[cutOneAndOne]
             selMuons     = selMuons[cutOneAndOne] 
 
@@ -308,10 +316,11 @@ class SUEP_cluster(processor.ProcessorABC):
             cutHasTwoLeps  = ((cutHasTwoMuons) | (cutHasTwoElecs)) & cutTwoLeps
             ### Cut the events, also return the selected leptons for operation down the line
             events = events[cutHasTwoLeps]
+            eColls = [coll[cutHasTwoLeps] for coll in extraColls]
             selElectrons = selElectrons[cutHasTwoLeps]
             selMuons = selMuons[cutHasTwoLeps]
 
-        return events, selElectrons, selMuons 
+        return events, selElectrons, selMuons, eColls 
 
     def selectByJets(self, events, leptons = [],  altJets = [], extraColls = []):
         # These are just standard jets, as available in the nanoAOD
@@ -516,7 +525,16 @@ class SUEP_cluster(processor.ProcessorABC):
 
         # Data dependant stuff
         dataset = events.metadata['dataset']
-        if self.isMC: self.gensumweight = ak.sum(events.genWeight)
+        if self.isMC: 
+            self.gensumweight     = ak.sum(events.genWeight)
+            if self.isSignal:
+                self.pdfweights, self.pdfconf = get_pdf_alphaS_variations(events, allow_manual=True, pdfname="NNPDF31_nnlo_as_0118_mc_hessian_pdfas")
+                self.gensumpdfweights = ak.sum(self.pdfweights, axis=0)
+                print(".")
+                print(".")                
+                print(self.pdfweights, self.gensumpdfweights, self.pdfconf)
+                print(".")
+                print(".")
 
         if not(self.isMC): doGen = False
 
@@ -525,17 +543,18 @@ class SUEP_cluster(processor.ProcessorABC):
         # ------------------------------------------------------------------------------------
         # MET filters
         if debug: print("Applying MET requirements.... %i events in"%len(events))
-        self.events = self.selectByFilters(events)
+        self.events, extra = self.selectByFilters(events, [self.pdfweights])
+        self.pdfweights = extra[0]
         if not(self.shouldContinueAfterCut(self.events, outputs)): return accumulator # If we have no events, we simply stop
         if debug: print("%i events pass METFilter cuts. Applying trigger requirements...."%len(self.events))
-
-        self.events, [] = self.selectByTrigger(self.events,[])
-
+        self.events, extra = self.selectByTrigger(self.events,[self.pdfweights])
+        self.pdfweights = extra[0]
         if not(self.shouldContinueAfterCut(self.events, outputs)): return accumulator
         if debug: print("%i events pass trigger cuts. Selecting leptons..."%len(self.events))
 
         # Lepton selection
-        self.events, self.electrons, self.muons = self.selectByLeptons(self.events)[:3]
+        self.events, self.electrons, self.muons, extra= self.selectByLeptons(self.events, [self.pdfweights])
+        self.pdfweights = extra[0]
         if not(self.shouldContinueAfterCut(self.events, outputs)): return accumulator # If we have no events, we simply stop
         self.leptons = ak.concatenate([self.electrons, self.muons], axis=1)
         highpt_leptons = ak.argsort(self.leptons.pt, axis=1, ascending=False, stable=True)
@@ -612,7 +631,7 @@ class SUEP_cluster(processor.ProcessorABC):
           outputsnew = {}
           for channel in outputs:
             outputsnew[channel] = outputs[channel]
-            if self.isSignal: # Only do JEC/JER for signal
+            if self.isSignal: # Only do JEC/JER/Scales for signal
               outputsnew[channel + "_JECUP"]   = outputs[channel]
               outputsnew[channel + "_JECDOWN"] = outputs[channel]
               outputsnew[channel + "_JERUP"]   = outputs[channel]
@@ -782,6 +801,8 @@ class SUEP_cluster(processor.ProcessorABC):
         if self.do_syst and self.var == "":
             for var in self.isrweights:
                 self.isrweights[var]   = self.isrweights[var][cut]
+        if self.isSignal:
+            self.pdfweights = self.pdfweights[cut]
 
     def saveAllCollections(self): # Save collections before cutting, to reset when dealing with systematics
         self.safeevents    = self.events
@@ -820,7 +841,9 @@ class SUEP_cluster(processor.ProcessorABC):
                 self.safegenZ    = self.genZ
                 self.safegenH    = self.genH
                 self.safegenSUEP = self.genSUEP
-        
+        if self.isSignal:
+            self.safepdfweights = self.pdfweights
+
     def resetAllCollections(self): # Reset collections to before cutting, useful when dealing with systematics
         self.events    = self.safeevents
         self.electrons = self.safeelectrons
@@ -853,6 +876,8 @@ class SUEP_cluster(processor.ProcessorABC):
                 self.genZ    = self.safegenZ
                 self.genH    = self.safegenH
                 self.genSUEP = self.safegenSUEP
+        if self.isSignal:
+            self.pdfweights = self.safepdfweights
 
     def btagcuts(self, WP, era):
         if era == 2015: #2016APV
@@ -1364,8 +1389,6 @@ class SUEP_cluster(processor.ProcessorABC):
         out["SUEP_anyak4_overlap"]    = ak.any(self.clusters[:,0].deltaR(self.jets) < 1.5, axis=1)[:]
         out["SUEP_anyak4_overlap"]    = ak.sum(self.clusters[:,0].deltaR(self.jets) < 1.5, axis=1)[:]
         out["SUEP_anyak4_overlap_ID"] = ak.fill_none(ak.argmin(self.clusters[:,0].deltaR(self.jets), axis=1)[:],-1)[:] # Aka, the index of the jet that more closely aligns with the SUEP
-        print(ak.argmin(self.clusters[:,0].deltaR(self.jets), axis=1))
-        print(ak.fill_none(ak.argmin(self.clusters[:,0].deltaR(self.jets), axis=1), 0))
         toreadpt = ak.fill_none(ak.pad_none(self.jets.pt,  1, axis=1, clip=False), 0.)
         out["SUEP_anyak4_overlap_pt"] = np.array([toreadpt[kkk] for kkk in  [(iii, jjj) for iii, jjj in enumerate(ak.fill_none(ak.argmin(self.clusters[:,0].deltaR(self.jets), axis=1), 0))]]) # Aka, the pT of the jet that more closely aligns with the SUEP
         out["SUEP_anyak4_overlap_HT"] = ak.sum(self.jets.pt[self.clusters[:,0].deltaR(self.jets) < 1.5], axis=1)[:] # Aka, the sum of the pT of all the jets that align with the SUEP
@@ -1408,7 +1431,11 @@ class SUEP_cluster(processor.ProcessorABC):
            out["LepSF_ElDn"]  = self.leptonSFs["LepSFElDown"][:]
            out["LepSF_MuUp"]  = self.leptonSFs["LepSFMuUp"][:]
            out["LepSF_MuDn"]  = self.leptonSFs["LepSFMuDown"][:]
-
+           if self.isSignal:
+               for iPDF in self.pdfconf["iPDF"]:
+                   out["PDFWeight_%i"%iPDF] = self.pdfweights[:, iPDF]
+               out["AlphaSWeight_Up"]       = self.pdfweights[:, self.pdfconf["iAlphaSUp"]]
+               out["AlphaSWeight_Down"]     = self.pdfweights[:, self.pdfconf["iAlphaSDown"]]
 
         if self.doTracks:
             out["ntracks"]     = ak.num(self.tracks, axis=1)[:]
