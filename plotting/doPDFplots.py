@@ -2,9 +2,10 @@ import ROOT
 import pandas as pd
 import root_numpy
 import numpy as np
+import sys
 
 ROOT.gStyle.SetOptStat(0)
-inp  = pd.HDFStore("/eos/user/c/cericeci/SUEP/SUEPCoffea_dask/condor_out_262003_263_1.hdf5","r")
+inp  = pd.HDFStore(sys.argv[1],"r")
 sr   = inp["SR"]
 meta = inp.get_storer("SR").attrs.metadata
 xsec = 900
